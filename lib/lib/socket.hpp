@@ -4,6 +4,7 @@
 #include <uv.h>
 #include <functional>
 #include <string>
+#include <vector>  // Added for buffer
 
 namespace Socket {
     class Connection {
@@ -12,6 +13,8 @@ namespace Socket {
         bool connected;
         std::function<void(const char*, size_t)> dataCallback;
         std::function<void()> closeCallback;
+        std::function<void()> connectedCallback;
+        std::vector<char> buffer;  // Added for accumulating incoming data
 
         Connection(uv_stream_t* s, bool isConnected);
         ~Connection();
@@ -21,6 +24,7 @@ namespace Socket {
         void close() const;
         void onData(const std::function<void(const char*, size_t)>& cb);
         void onClose(const std::function<void()>& cb);
+        void onConnected(const std::function<void()>& cb);
     };
 
     class Server {

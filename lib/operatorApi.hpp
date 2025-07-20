@@ -13,10 +13,12 @@ public:
     enum class Verdict {OK, WA, TL, ML, ITL, RTL, RML, CE, ERR};
 
 protected:
-    Socket::Client* client;
     Socket::Connection* connection;
     int imagesCount = 0, containersCount = 0;
     std::vector<std::function<void(const std::string&)>> callbacks;
+    const std::string separatorStr = "----++++====message end====++++----";
+
+    explicit OperatorApi(Socket::Connection* connection);
 
     static std::string stringValue(STDOUT value);
     static std::string stringValue(Verdict value);
@@ -41,7 +43,7 @@ protected:
         void onStderr(const std::function<void(const std::string&)>& callback) const;
 
         template<typename Type>
-        Container& operator<<(const Type& chunk) {
+        void operator<<(const Type& chunk) {
             std::ostringstream stream;
             stream << chunk;
             initStdin += stream.str();
@@ -69,7 +71,7 @@ protected:
         void write(const std::string& chunk) const;
 
         template<typename Type>
-        Container& operator<<(const Type& chunk) {
+        void operator<<(const Type& chunk) {
             std::ostringstream stream;
             stream << chunk;
             write(stream.str());
@@ -79,10 +81,10 @@ protected:
     };
 
 public:
-    explicit OperatorApi(const std::string& socket);
+    static void create(const std::string& path, const std::function<void(OperatorApi)>& callback);
 
     std::function<ContainerTemplate*()> build(const std::string& context, const std::string& dockerfilePath);
 
-    void setVerdict(const std::string& subtaskId, Verdict verdict, const std::string& data) const;
-    void setVerdict(Verdict verdict, const std::string& data) const;
+    void setVerdict(const std::string& subtaskId, Verdict verdict, const std::string& data = "") const;
+    void setVerdict(Verdict verdict, const std::string& data = "") const;
 };

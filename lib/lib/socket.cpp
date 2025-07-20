@@ -11,11 +11,19 @@ namespace Socket {
     Connection::~Connection() = default;
 
     void Connection::write(const char* data, size_t len) const {
-        auto buf = new char[len];
-        std::memcpy(buf, data, len);
+        // Calculate total size: 4 bytes for length + data
+        uint32_t len_prefix = static_cast<uint32_t>(len);
+        size_t total_len = sizeof(len_prefix) + len;
+        auto buf = new char[total_len];
+
+        // Copy length into the beginning of the buffer
+        std::memcpy(buf, &len_prefix, sizeof(len_prefix));
+        // Copy data after the length
+        std::memcpy(buf + sizeof(len_prefix), data, len);
+
         auto* req = new uv_write_t;
         req->data = buf;
-        const uv_buf_t uvbuf = uv_buf_init(buf, len);
+        const uv_buf_t uvbuf = uv_buf_init(buf, total_len);
         uv_write(req, stream, &uvbuf, 1, [](uv_write_t* req, int status) {
             if (status < 0) {
                 std::cerr << "Write error: " << uv_strerror(status) << std::endl;
@@ -51,8 +59,27 @@ namespace Socket {
                 [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
                     auto* conn = static_cast<Connection*>(stream->data);
                     if (nread > 0) {
-                        if (conn->dataCallback) {
-                            conn->dataCallback(buf->base, nread);
+                        // Add received data to the buffer
+                        conn->buffer.insert(conn->buffer.end(), buf->base, buf->base + nread);
+
+                        // Process all complete messages in the buffer
+                        while (conn->buffer.size() >= sizeof(uint32_t)) {
+                            // Read message length
+                            uint32_t len;
+                            std::memcpy(&len, conn->buffer.data(), sizeof(uint32_t));
+
+                            // Check if enough data for the full message
+                            if (conn->buffer.size() >= sizeof(uint32_t) + len) {
+                                // Call callback with the message
+                                if (conn->dataCallback) {
+                                    conn->dataCallback(conn->buffer.data() + sizeof(uint32_t), len);
+                                }
+                                // Remove the processed message from the buffer
+                                conn->buffer.erase(conn->buffer.begin(), conn->buffer.begin() + sizeof(uint32_t) + len);
+                            } else {
+                                // Not enough data for a full message, exit the loop
+                                break;
+                            }
                         }
                     } else if (nread < 0) {
                         uv_close(reinterpret_cast<uv_handle_t*>(stream), [](uv_handle_t* handle) {
@@ -72,6 +99,13 @@ namespace Socket {
 
     void Connection::onClose(const std::function<void()>& cb) {
         closeCallback = cb;
+    }
+
+    void Connection::onConnected(const std::function<void()>& cb) {
+        connectedCallback = cb;
+        if (connected && connectedCallback) {
+            connectedCallback();
+        }
     }
 
     void Server::onNewConnection(uv_stream_t* server, int status) {
@@ -144,6 +178,9 @@ namespace Socket {
             auto* conn = static_cast<Connection*>(req->data);
             if (status == 0) {
                 conn->connected = true;
+                if (conn->connectedCallback) {
+                    conn->connectedCallback();
+                }
                 if (conn->dataCallback) {
                     uv_read_start(conn->stream,
                         [](uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -153,8 +190,27 @@ namespace Socket {
                         [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
                             auto* conn = static_cast<Connection*>(stream->data);
                             if (nread > 0) {
-                                if (conn->dataCallback) {
-                                    conn->dataCallback(buf->base, nread);
+                                // Add received data to the buffer
+                                conn->buffer.insert(conn->buffer.end(), buf->base, buf->base + nread);
+
+                                // Process all complete messages in the buffer
+                                while (conn->buffer.size() >= sizeof(uint32_t)) {
+                                    // Read message length
+                                    uint32_t len;
+                                    std::memcpy(&len, conn->buffer.data(), sizeof(uint32_t));
+
+                                    // Check if enough data for the full message
+                                    if (conn->buffer.size() >= sizeof(uint32_t) + len) {
+                                        // Call callback with the message
+                                        if (conn->dataCallback) {
+                                            conn->dataCallback(conn->buffer.data() + sizeof(uint32_t), len);
+                                        }
+                                        // Remove the processed message from the buffer
+                                        conn->buffer.erase(conn->buffer.begin(), conn->buffer.begin() + sizeof(uint32_t) + len);
+                                    } else {
+                                        // Not enough data for a full message, exit the loop
+                                        break;
+                                    }
                                 }
                             } else if (nread < 0) {
                                 uv_close(reinterpret_cast<uv_handle_t*>(stream), [](uv_handle_t* handle) {
@@ -185,11 +241,11 @@ namespace Socket {
         return conn;
     }
 
-    void Client::run() const {
-        uv_run(loop, UV_RUN_DEFAULT);
-    }
-
     void Client::stop() const {
         uv_stop(loop);
+    }
+
+    void Client::run() const {
+        uv_run(loop, UV_RUN_DEFAULT);
     }
 }

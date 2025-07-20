@@ -1,5 +1,16 @@
 #include "operatorApi.hpp"
+
+#include <iostream>
 #include <utility>
+
+OperatorApi::OperatorApi(Socket::Connection* connection): connection(connection) {
+    connection->onData([this](const char* chunk, int length) {
+        std::string data(chunk, length);
+        for (const auto& callback : this->callbacks) {
+            callback(data);
+        }
+    });
+}
 
 std::string OperatorApi::stringValue(const STDOUT value) {
     switch (value) {
@@ -95,15 +106,14 @@ void OperatorApi::Container::getPort(int port, const std::function<void(int)>& c
     operatorApi->connection->write("PORT " + std::to_string(id) + '\n' + std::to_string(port));
 }
 
-OperatorApi::OperatorApi(const std::string& socket) {
-    client = new Socket::Client;
-    connection = client->connect(socket.c_str());
-    connection->onData([this](const char* chunk, int length) {
-        std::string data(chunk, length);
-        for (const auto& callback : this->callbacks) {
-            callback(data);
-        }
+void OperatorApi::create(const std::string& path, const std::function<void(OperatorApi)>& callback) {
+    Socket::Client client;
+    auto connection = client.connect(path.c_str());
+    connection->onConnected([&connection, &callback] {
+        OperatorApi operatorApi(connection);
+        callback(operatorApi);
     });
+    client.run();
 }
 
 std::function<OperatorApi::ContainerTemplate*()> OperatorApi::build(const std::string& context, const std::string& dockerfilePath) {
@@ -115,9 +125,9 @@ std::function<OperatorApi::ContainerTemplate*()> OperatorApi::build(const std::s
 }
 
 void OperatorApi::setVerdict(const std::string& subtaskId, Verdict verdict, const std::string& data) const {
-    connection->write("VERDICT " + stringValue(verdict) + "\nSUB " + subtaskId + "\nDATA" + data);
+    connection->write("VERDICT " + stringValue(verdict) + "\nSUB " + subtaskId + (data.empty() ? "" : "\nDATA" + data));
 }
 
 void OperatorApi::setVerdict(Verdict verdict, const std::string& data) const {
-    connection->write("VERDICT " + stringValue(verdict) + "\nDATA" + data);
+    connection->write("VERDICT " + stringValue(verdict) + (data.empty() ? "" : "\nDATA" + data));
 }
