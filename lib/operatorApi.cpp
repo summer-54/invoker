@@ -53,14 +53,14 @@ void OperatorApi::ContainerTemplate::onStderr(const std::function<void(const std
 OperatorApi::Container* OperatorApi::ContainerTemplate::run() {
     std::ostringstream stream;
     int id = operatorApi->containersCount++;
-    stream << "RUN " << id << '\n' << "STDOUT " << stringValue(stdout) << '\n'
+    stream << "RUN " << id << '\n' << image << '\n' << "STDOUT " << stringValue(stdout) << '\n'
         << "STDERR " << stringValue(stderr) << '\n';
     if (!ports.empty()) {
         stream << "PORTS";
         for (int port : ports) stream << ' ' << port;
         stream << '\n';
     }
-    for (const auto& [a, b] : volumes) stream << "VOLUME " << a << ' ' << b << '\n';
+    for (const auto& [a, b] : volumes) stream << "VOLUME " << a << '\n' << b << '\n';
     for (const auto& [a, b] : env) stream << "ENV " << a << ' ' << b << '\n';
     if (!initStdin.empty()) stream << "WRITE\n" << initStdin;
     std::string chunk = stream.str();
