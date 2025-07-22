@@ -1,8 +1,22 @@
 #include "podmanClient.hpp"
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <archive.h>
+#include <archive_entry.h>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
+
+namespace {
+    long int write_callback(struct archive *a, void *user_data, const void *buffer, size_t length) {
+        std::vector<char>* data = static_cast<std::vector<char>*>(user_data);
+        const char* buf = static_cast<const char*>(buffer);
+        data->insert(data->end(), buf, buf + length);
+        return ARCHIVE_OK;
+    }
+}
 
 struct PodmanClient::Impl {
     httplib::Client cli_;
@@ -15,20 +29,73 @@ struct PodmanClient::Impl {
 PodmanClient::PodmanClient(const std::string& socket_path) : pimpl_(std::make_unique<Impl>(socket_path)) {}
 PodmanClient::~PodmanClient() = default;
 
-void PodmanClient::build_image(const std::string& context, const std::string& dockerfilePath, const std::string& tag) {
-    std::string url = "/build?dockerfile=" + dockerfilePath + "&t=" + tag;
-    auto res = pimpl_->cli_.Post(url, context, "application/x-tar",
-                                 [](const char *data, const size_t data_length) {
-                                     std::cout << std::string(data, data_length);
-                                     return true;
-                                 });
-    if (!res || res->status != 200) {
-        throw std::runtime_error("Failed to build image");
+void PodmanClient::build(const std::string& tag, const std::string& context, const std::string& dockerfile) const {
+    // Validate context is a directory
+    if (!std::filesystem::is_directory(context)) {
+        throw std::runtime_error("Context path is not a directory: " + context);
     }
-    std::cout << "Image built successfully: " << tag << std::endl;
+
+    // Create in-memory tar archive
+    std::vector<char> tar_buffer;
+    struct archive *a = archive_write_new();
+    archive_write_set_format_ustar(a);
+    archive_write_open(a, &tar_buffer, nullptr, write_callback, nullptr);
+
+    // Recursively add files from context directory
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(context)) {
+        std::filesystem::path path = entry.path();
+        std::string rel_path = std::filesystem::relative(path, context).string();
+        if (rel_path == ".") continue; // Skip the context directory itself
+
+        struct archive_entry *ae = archive_entry_new();
+        archive_entry_set_pathname(ae, rel_path.c_str());
+        archive_entry_set_size(ae, std::filesystem::file_size(path));
+        archive_entry_set_filetype(ae, entry.is_directory() ? AE_IFDIR : AE_IFREG);
+        archive_entry_set_perm(ae, 0644);
+        archive_write_header(a, ae);
+
+        if (!entry.is_directory()) {
+            std::ifstream file(path, std::ios::binary);
+            if (!file) {
+                archive_entry_free(ae);
+                archive_write_free(a);
+                throw std::runtime_error("Failed to open file: " + path.string());
+            }
+            char buffer[8192];
+            while (file) {
+                file.read(buffer, sizeof(buffer));
+                archive_write_data(a, buffer, file.gcount());
+            }
+        }
+
+        archive_entry_free(ae);
+    }
+
+    archive_write_close(a);
+    archive_write_free(a);
+
+    // Send tarball to Podman API
+    std::string url = "/build?t=" + tag + "&dockerfile=" + dockerfile;
+    auto res = pimpl_->cli_.Post(
+        url.c_str(),
+        tar_buffer.size(),
+        [&tar_buffer](uint64_t offset, uint64_t length, httplib::DataSink& sink) {
+            sink.write(tar_buffer.data() + offset, std::min(length, tar_buffer.size() - offset));
+            return true;
+        },
+        "application/x-tar"
+    );
+
+    if (!res) {
+        std::cerr << "Build failed: " << res.error() << std::endl;
+    } else if (res->status != 200) {
+        std::cerr << "Build failed with status: " << res->status << std::endl;
+    } else {
+        std::cout << res->body << std::endl;
+    }
 }
 
-std::string PodmanClient::create_container(const std::string& image, const std::vector<std::string>& cmd,
+std::string PodmanClient::create(const std::string& image, const std::vector<std::string>& cmd,
                                            const std::map<std::string, std::string>& ports,
                                            const std::map<std::string, std::string>& env,
                                            const std::vector<std::pair<std::string, std::string>>& volumes,
@@ -82,43 +149,43 @@ std::string PodmanClient::create_container(const std::string& image, const std::
     std::string container_id = json_res["Id"];
     std::cout << "Container created with ID: " << container_id << std::endl;
 
-    start_container(container_id);
+    start(container_id);
     if (!initStdin.empty()) {
-        write_to_container_stdin(container_id, initStdin);
+        write(container_id, initStdin);
     }
 
     return container_id;
 }
 
-void PodmanClient::start_container(const std::string& container_id) {
-    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/start", "");
+void PodmanClient::start(const std::string& container_id) const {
+    auto res = pimpl_->cli_.Post(("/containers/" + container_id + "/start").c_str());
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to start container");
     }
     std::cout << "Container started: " << container_id << std::endl;
 }
 
-std::string PodmanClient::run_container(const std::string& image, const std::vector<std::string>& cmd) {
-    return create_container(image, cmd, {}, {}, {}, "");
+std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd) {
+    return create(image, cmd, {}, {}, {}, "");
 }
 
-void PodmanClient::stop_container(const std::string& container_id) {
-    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/stop", "");
+void PodmanClient::stop(const std::string& container_id) const {
+    auto res = pimpl_->cli_.Post(("/containers/" + container_id + "/stop").c_str());
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to stop container");
     }
     std::cout << "Container stopped: " << container_id << std::endl;
 }
 
-void PodmanClient::restart_container(const std::string& container_id) {
-    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/restart", "");
+void PodmanClient::restart(const std::string& container_id) const {
+    auto res = pimpl_->cli_.Post(("/containers/" + container_id + "/restart").c_str());
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to restart container");
     }
     std::cout << "Container restarted: " << container_id << std::endl;
 }
 
-void PodmanClient::write_to_container_stdin(const std::string& container_id, const std::string& input) {
+void PodmanClient::write(const std::string& container_id, const std::string& input) const {
     auto res = pimpl_->cli_.Post("/containers/" + container_id + "/attach?stdin=1&stream=1",
                                  input,
                                  "application/vnd.docker.raw-stream");
@@ -128,23 +195,29 @@ void PodmanClient::write_to_container_stdin(const std::string& container_id, con
     std::cout << "Wrote to container stdin: " << container_id << std::endl;
 }
 
-void PodmanClient::setOnStdoutCallback(std::function<void(const std::string&)> callback) {
+void PodmanClient::onStdout(std::function<void(const std::string&)> callback) const {
     pimpl_->onStdoutCallback_ = callback;
 }
 
-void PodmanClient::setOnStderrCallback(std::function<void(const std::string&)> callback) {
+void PodmanClient::onStderr(std::function<void(const std::string&)> callback) const {
     pimpl_->onStderrCallback_ = callback;
 }
 
-void PodmanClient::attach_to_container(const std::string& container_id) {
-    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1", "",
-                                 "application/vnd.docker.raw-stream",
-                                 [this](const char *data, const size_t data_length) {
-                                     std::string output(data, data_length);
-                                     if (pimpl_->onStdoutCallback_) pimpl_->onStdoutCallback_(output);
-                                     if (pimpl_->onStderrCallback_) pimpl_->onStderrCallback_(output);
-                                     return true;
-                                 });
+void PodmanClient::attach(const std::string& container_id) {
+    httplib::Headers headers;
+    auto res = pimpl_->cli_.Post(
+        ("/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1").c_str(),
+        headers,
+        "",
+        "application/vnd.docker.raw-stream",
+        [this](const char *data, size_t data_length) {
+            std::string output(data, data_length);
+            if (pimpl_->onStdoutCallback_) pimpl_->onStdoutCallback_(output);
+            if (pimpl_->onStderrCallback_) pimpl_->onStderrCallback_(output);
+            return true;
+        },
+        nullptr
+    );
     if (!res || res->status != 200) {
         throw std::runtime_error("Failed to attach to container");
     }
