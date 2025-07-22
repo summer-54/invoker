@@ -9,7 +9,7 @@ struct PodmanClient::Impl {
     std::function<void(const std::string&)> onStdoutCallback_;
     std::function<void(const std::string&)> onStderrCallback_;
 
-    Impl(const std::string& socket_path) : cli_(socket_path) {}
+    explicit Impl(const std::string& socket_path) : cli_(socket_path) {}
 };
 
 PodmanClient::PodmanClient(const std::string& socket_path) : pimpl_(std::make_unique<Impl>(socket_path)) {}
@@ -18,7 +18,7 @@ PodmanClient::~PodmanClient() = default;
 void PodmanClient::build_image(const std::string& context, const std::string& dockerfilePath, const std::string& tag) {
     std::string url = "/build?dockerfile=" + dockerfilePath + "&t=" + tag;
     auto res = pimpl_->cli_.Post(url, context, "application/x-tar",
-                                 [](const char *data, size_t data_length) {
+                                 [](const char *data, const size_t data_length) {
                                      std::cout << std::string(data, data_length);
                                      return true;
                                  });
@@ -42,37 +42,34 @@ std::string PodmanClient::create_container(const std::string& image, const std::
         {"AttachStderr", true}
     };
 
-    // Configure ExposedPorts
     nlohmann::json exposed_ports = nlohmann::json::object();
-    for (const auto& p : ports) {
-        std::string container_port = p.first + "/tcp";
+    for (const auto& key : ports | std::views::keys) {
+        const std::string container_port = key + "/tcp";
         exposed_ports[container_port] = nlohmann::json::object();
     }
     body["ExposedPorts"] = exposed_ports;
 
-    // Configure Environment Variables
     std::vector<std::string> env_list;
-    for (const auto& e : env) {
-        env_list.push_back(e.first + "=" + e.second);
+    for (const auto& [key, value] : env) {
+        env_list.push_back(key + "=" + value);
     }
     body["Env"] = env_list;
 
-    // Configure HostConfig for port bindings and volumes
     nlohmann::json host_config = {
         {"PortBindings", nlohmann::json::object()},
         {"Mounts", nlohmann::json::array()}
     };
-    for (const auto& p : ports) {
-        std::string container_port = p.first + "/tcp";
+    for (const auto& [host, virt] : ports) {
+        const std::string container_port = host + "/tcp";
         host_config["PortBindings"][container_port] = {
-            {{"HostPort", p.second}}
+            {{"HostPort", virt}}
         };
     }
-    for (const auto& v : volumes) {
+    for (const auto& [host, virt] : volumes) {
         host_config["Mounts"].push_back({
             {"Type", "bind"},
-            {"Source", v.first},
-            {"Target", v.second}
+            {"Source", host},
+            {"Target", virt}
         });
     }
     body["HostConfig"] = host_config;
@@ -84,6 +81,12 @@ std::string PodmanClient::create_container(const std::string& image, const std::
     auto json_res = nlohmann::json::parse(res->body);
     std::string container_id = json_res["Id"];
     std::cout << "Container created with ID: " << container_id << std::endl;
+
+    start_container(container_id);
+    if (!initStdin.empty()) {
+        write_to_container_stdin(container_id, initStdin);
+    }
+
     return container_id;
 }
 
@@ -96,9 +99,7 @@ void PodmanClient::start_container(const std::string& container_id) {
 }
 
 std::string PodmanClient::run_container(const std::string& image, const std::vector<std::string>& cmd) {
-    std::string container_id = create_container(image, cmd, {}, {}, {}, "");
-    start_container(container_id);
-    return container_id;
+    return create_container(image, cmd, {}, {}, {}, "");
 }
 
 void PodmanClient::stop_container(const std::string& container_id) {
@@ -138,7 +139,7 @@ void PodmanClient::setOnStderrCallback(std::function<void(const std::string&)> c
 void PodmanClient::attach_to_container(const std::string& container_id) {
     auto res = pimpl_->cli_.Post("/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1", "",
                                  "application/vnd.docker.raw-stream",
-                                 [this](const char *data, size_t data_length) {
+                                 [this](const char *data, const size_t data_length) {
                                      std::string output(data, data_length);
                                      if (pimpl_->onStdoutCallback_) pimpl_->onStdoutCallback_(output);
                                      if (pimpl_->onStderrCallback_) pimpl_->onStderrCallback_(output);
