@@ -8,8 +8,8 @@
 
 class AsyncProcess {
     mutable boost::process::child childProcess;
-    boost::asio::io_service ioService;
-    std::unique_ptr<boost::asio::io_service::work> work;
+    boost::asio::io_context ioContext;
+    boost::asio::executor_work_guard<boost::asio::io_context::executor_type> work;
     std::thread ioThread;
 
     boost::process::async_pipe outPipe;

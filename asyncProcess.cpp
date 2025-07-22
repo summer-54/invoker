@@ -35,9 +35,9 @@ void AsyncProcess::checkCompletion() const {
 }
 
 AsyncProcess::AsyncProcess(const std::string& command, const std::string& cwd):
-    work(std::make_unique<boost::asio::io_service::work>(ioService)),
-    outPipe(ioService),
-    errPipe(ioService)
+    work(boost::asio::make_work_guard(ioContext)),
+    outPipe(ioContext),
+    errPipe(ioContext)
 {
     boost::process::environment env = boost::this_process::environment();
     childProcess = boost::process::child(
@@ -45,12 +45,12 @@ AsyncProcess::AsyncProcess(const std::string& command, const std::string& cwd):
         boost::process::std_in < in,
         boost::process::std_out > outPipe,
         boost::process::std_err > errPipe,
-        ioService,
+        ioContext,
         boost::process::start_dir(cwd.empty() ? boost::filesystem::current_path() : cwd),
         env
     );
 
-    ioThread = std::thread([this]() { ioService.run(); });
+    ioThread = std::thread([this]() { ioContext.run(); });
 
     readOutput();
     readErrors();
