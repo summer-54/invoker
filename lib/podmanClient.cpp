@@ -30,7 +30,28 @@ struct PodmanClient::Impl {
 PodmanClient::PodmanClient(const std::string& socket_path) : pimpl_(std::make_unique<Impl>(socket_path)) {}
 PodmanClient::~PodmanClient() = default;
 
-void PodmanClient::build(const std::string& tag, const std::string& context, const std::string& dockerfile) const {
+void PodmanClient::buildTar(const std::string& tag, const std::string& binaryTarData, const std::string& dockerfilePath) const {
+    std::string url = "/build?t=" + tag + "&dockerfile=" + dockerfilePath;
+    auto res = pimpl_->cli_.Post(
+        url,
+        binaryTarData.size(),
+        [&binaryTarData](uint64_t offset, uint64_t length, httplib::DataSink& sink) {
+            sink.write(binaryTarData.data() + offset, std::min(length, binaryTarData.size() - offset));
+            return true;
+        },
+        "application/x-tar"
+    );
+
+    if (!res) {
+        std::cerr << "Build failed: " << res.error() << std::endl;
+    } else if (res->status != 200) {
+        std::cerr << "Build failed with status: " << res->status << std::endl;
+    } else {
+        std::cout << res->body << std::endl;
+    }
+}
+
+void PodmanClient::build(const std::string& tag, const std::string& context, const std::string& dockerfilePath) const {
     // Validate context is a directory
     if (!std::filesystem::is_directory(context)) {
         throw std::runtime_error("Context path is not a directory: " + context);
@@ -75,31 +96,16 @@ void PodmanClient::build(const std::string& tag, const std::string& context, con
     archive_write_close(a);
     archive_write_free(a);
 
-    // Send tarball to Podman API
-    std::string url = "/build?t=" + tag + "&dockerfile=" + dockerfile;
-    auto res = pimpl_->cli_.Post(
-        url,
-        tar_buffer.size(),
-        [&tar_buffer](uint64_t offset, uint64_t length, httplib::DataSink& sink) {
-            sink.write(tar_buffer.data() + offset, std::min(length, tar_buffer.size() - offset));
-            return true;
-        },
-        "application/x-tar"
-    );
-
-    if (!res) {
-        std::cerr << "Build failed: " << res.error() << std::endl;
-    } else if (res->status != 200) {
-        std::cerr << "Build failed with status: " << res->status << std::endl;
-    } else {
-        std::cout << res->body << std::endl;
-    }
+    // Convert tar_buffer to std::string and call buildTar
+    std::string tar_data(tar_buffer.begin(), tar_buffer.end());
+    buildTar(tag, tar_data, dockerfilePath);
 }
 
 std::string PodmanClient::create(const std::string& image, const std::vector<std::string>& cmd,
                                            const std::map<std::string, std::string>& ports,
                                            const std::map<std::string, std::string>& env,
-                                           const std::vector<std::pair<std::string, std::string>>& volumes) const {
+                                           const std::vector<std::pair<std::string, std::string>>& volumes,
+                                           const std::vector<std::string>& networks) const {
     nlohmann::json body = {
         {"Image", image},
         {"Cmd", cmd},
@@ -141,6 +147,16 @@ std::string PodmanClient::create(const std::string& image, const std::vector<std
     }
     body["HostConfig"] = host_config;
 
+    if (!networks.empty()) {
+        nlohmann::json endpoints_config = nlohmann::json::object();
+        for (const auto& network : networks) {
+            endpoints_config[network] = nlohmann::json::object();
+        }
+        body["NetworkingConfig"] = {
+            {"EndpointsConfig", endpoints_config}
+        };
+    }
+
     auto res = pimpl_->cli_.Post("/containers/create", body.dump(), "application/json");
     if (!res || res->status != 201) {
         throw std::runtime_error("Failed to create container");
@@ -152,8 +168,13 @@ std::string PodmanClient::create(const std::string& image, const std::vector<std
     return container_id;
 }
 
-std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd, const std::map<std::string, std::string>& ports, const std::map<std::string, std::string>& env, const std::vector<std::pair<std::string, std::string>>& volumes, const std::string& initStdin) const {
-    std::string container_id = create(image, cmd, ports, env, volumes);
+std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd,
+                                        const std::map<std::string, std::string>& ports,
+                                        const std::map<std::string, std::string>& env,
+                                        const std::vector<std::pair<std::string, std::string>>& volumes,
+                                        const std::vector<std::string>& networks,
+                                        const std::string& initStdin) const {
+    std::string container_id = create(image, cmd, ports, env, volumes, networks);
     start(container_id, initStdin);
     return container_id;
 }

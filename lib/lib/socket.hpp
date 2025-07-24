@@ -41,7 +41,7 @@ namespace Socket {
         ~Server();
 
         void onConnect(const std::function<void(Connection*)>& cb);
-        void start() const;
+        void start(const std::function<void()>& startCallback) const;
         void stop() const;
     };
 

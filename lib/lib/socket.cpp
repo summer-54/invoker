@@ -149,9 +149,16 @@ namespace Socket {
         connectCallback = cb;
     }
 
-    void Server::start() const {
-        uv_listen(reinterpret_cast<uv_stream_t*>(pipe), 128, onNewConnection);
-        uv_run(loop, UV_RUN_DEFAULT);
+    void Server::start(const std::function<void()>& startCallback) const {
+        int status = uv_listen(reinterpret_cast<uv_stream_t*>(pipe), 128, onNewConnection);
+        if (status == 0) {
+            if (startCallback) {
+                startCallback();
+            }
+            uv_run(loop, UV_RUN_DEFAULT);
+        } else {
+            std::cerr << "Listen error: " << uv_strerror(status) << std::endl;
+        }
     }
 
     void Server::stop() const {

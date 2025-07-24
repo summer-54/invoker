@@ -12,20 +12,21 @@ public:
     explicit PodmanClient(const std::string& socket_path);
     ~PodmanClient();
 
-    // Build an image with context (path to folder) and dockerfilePath (path within folder)
+    void buildTar(const std::string& tag, const std::string& binaryTarData, const std::string& dockerfilePath) const;
     void build(const std::string& tag, const std::string& context, const std::string& dockerfilePath) const;
 
-    // Create a container with specified ports, environment variables, volumes, and initial stdin
     std::string create(const std::string& image, const std::vector<std::string>& cmd,
-                                 const std::map<std::string, std::string>& ports,
-                                 const std::map<std::string, std::string>& env,
-                                 const std::vector<std::pair<std::string, std::string>>& volumes) const;
+                       const std::map<std::string, std::string>& ports,
+                       const std::map<std::string, std::string>& env,
+                       const std::vector<std::pair<std::string, std::string>>& volumes,
+                       const std::vector<std::string>& networks) const;
 
     std::string run(const std::string& image, const std::vector<std::string>& cmd,
-                                 const std::map<std::string, std::string>& ports,
-                                 const std::map<std::string, std::string>& env,
-                                 const std::vector<std::pair<std::string, std::string>>& volumes,
-                                 const std::string& initStdin) const;
+                    const std::map<std::string, std::string>& ports,
+                    const std::map<std::string, std::string>& env,
+                    const std::vector<std::pair<std::string, std::string>>& volumes,
+                    const std::vector<std::string>& networks,
+                    const std::string& initStdin) const;
 
     void start(const std::string& container_id, const std::string& initStdin) const;
     void stop(const std::string& container_id) const;

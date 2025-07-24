@@ -85,7 +85,6 @@ Session::Session(Socket::Connection* connection, const int id): connection(conne
                     else if (subtype == "WRITE") {
                         std::string tmp; std::getline(stream, tmp);
                         while (std::getline(stream, tmp)) initStdin += tmp;
-                        break;
                     }
                     else {
                         std::cout << "Error: " << subtype << '\n' << std::endl;
@@ -106,6 +105,18 @@ Session::Session(Socket::Connection* connection, const int id): connection(conne
                 std::string buffer, tmp;
                 while (std::getline(stream, tmp)) buffer += tmp;
                 write(id, buffer);
+            }
+            else if (type == "VERDICT") {
+                std::string verdict, sub, subtask, data_; stream >> verdict >> sub;
+                if (sub == "SUB") {
+                    std::getline(stream, subtask);
+                    stream >> sub;
+                }
+                if (sub == "DATA") {
+                    std::string tmp; std::getline(stream, tmp);
+                    while (std::getline(stream, tmp)) data_ += tmp;
+                }
+
             }
             else {
                 std::cout << "Unknown type: " << type << std::endl;
@@ -131,7 +142,7 @@ std::function<void(const std::string&)> stdoutCallback(int id, const std::string
 }
 
 void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, const std::vector<int>& ports, const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
-    auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, initStdin);
+    auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, {}, initStdin);
     containers[id] = containerId;
     revContainers[containerId] = id;
     if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
