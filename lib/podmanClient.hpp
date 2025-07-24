@@ -19,17 +19,21 @@ public:
     std::string create(const std::string& image, const std::vector<std::string>& cmd,
                                  const std::map<std::string, std::string>& ports,
                                  const std::map<std::string, std::string>& env,
-                                 const std::vector<std::pair<std::string, std::string>>& volumes,
-                                 const std::string& initStdin);
+                                 const std::vector<std::pair<std::string, std::string>>& volumes) const;
 
-    void start(const std::string& container_id) const;
-    std::string run(const std::string& image, const std::vector<std::string>& cmd);
+    std::string run(const std::string& image, const std::vector<std::string>& cmd,
+                                 const std::map<std::string, std::string>& ports,
+                                 const std::map<std::string, std::string>& env,
+                                 const std::vector<std::pair<std::string, std::string>>& volumes,
+                                 const std::string& initStdin) const;
+
+    void start(const std::string& container_id, const std::string& initStdin) const;
     void stop(const std::string& container_id) const;
     void restart(const std::string& container_id) const;
     void write(const std::string& container_id, const std::string& input) const;
-    void onStdout(std::function<void(const std::string&)> callback) const;
-    void onStderr(std::function<void(const std::string&)> callback) const;
-    void attach(const std::string& container_id);
+    void onStdout(const std::string& container_id, std::function<void(const std::string&)> callback) const;
+    void onStderr(const std::string& container_id, std::function<void(const std::string&)> callback) const;
+    void attach(const std::string& container_id) const;
 
 private:
     struct Impl;

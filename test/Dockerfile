@@ -1,3 +1,3 @@
 FROM ubuntu:latest
 
-ENTRYPOINT ["echo", "test"]
+ENTRYPOINT ["bash"]

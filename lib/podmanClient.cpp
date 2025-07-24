@@ -7,11 +7,12 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
     long int write_callback(struct archive *a, void *user_data, const void *buffer, size_t length) {
-        std::vector<char>* data = static_cast<std::vector<char>*>(user_data);
+        auto* data = static_cast<std::vector<char>*>(user_data);
         const char* buf = static_cast<const char*>(buffer);
         data->insert(data->end(), buf, buf + length);
         return ARCHIVE_OK;
@@ -20,8 +21,8 @@ namespace {
 
 struct PodmanClient::Impl {
     httplib::Client cli_;
-    std::function<void(const std::string&)> onStdoutCallback_;
-    std::function<void(const std::string&)> onStderrCallback_;
+    std::map<std::string, std::function<void(const std::string&)>> onStdoutCallbacks_;
+    std::map<std::string, std::function<void(const std::string&)>> onStderrCallbacks_;
 
     explicit Impl(const std::string& socket_path) : cli_(socket_path) {}
 };
@@ -77,7 +78,7 @@ void PodmanClient::build(const std::string& tag, const std::string& context, con
     // Send tarball to Podman API
     std::string url = "/build?t=" + tag + "&dockerfile=" + dockerfile;
     auto res = pimpl_->cli_.Post(
-        url.c_str(),
+        url,
         tar_buffer.size(),
         [&tar_buffer](uint64_t offset, uint64_t length, httplib::DataSink& sink) {
             sink.write(tar_buffer.data() + offset, std::min(length, tar_buffer.size() - offset));
@@ -98,8 +99,7 @@ void PodmanClient::build(const std::string& tag, const std::string& context, con
 std::string PodmanClient::create(const std::string& image, const std::vector<std::string>& cmd,
                                            const std::map<std::string, std::string>& ports,
                                            const std::map<std::string, std::string>& env,
-                                           const std::vector<std::pair<std::string, std::string>>& volumes,
-                                           const std::string& initStdin) {
+                                           const std::vector<std::pair<std::string, std::string>>& volumes) const {
     nlohmann::json body = {
         {"Image", image},
         {"Cmd", cmd},
@@ -149,28 +149,32 @@ std::string PodmanClient::create(const std::string& image, const std::vector<std
     std::string container_id = json_res["Id"];
     std::cout << "Container created with ID: " << container_id << std::endl;
 
-    start(container_id);
-    if (!initStdin.empty()) {
-        write(container_id, initStdin);
-    }
-
     return container_id;
 }
 
-void PodmanClient::start(const std::string& container_id) const {
-    auto res = pimpl_->cli_.Post(("/containers/" + container_id + "/start").c_str());
+std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd, const std::map<std::string, std::string>& ports, const std::map<std::string, std::string>& env, const std::vector<std::pair<std::string, std::string>>& volumes, const std::string& initStdin) const {
+    std::string container_id = create(image, cmd, ports, env, volumes);
+    start(container_id, initStdin);
+    return container_id;
+}
+
+void PodmanClient::start(const std::string& container_id, const std::string& initStdin) const {
+    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/start");
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to start container");
+    }
+    if (!initStdin.empty()) {
+        write(container_id, initStdin);
     }
     std::cout << "Container started: " << container_id << std::endl;
 }
 
-std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd) {
-    return create(image, cmd, {}, {}, {}, "");
-}
+// std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd) {
+//     return create(image, cmd, {}, {}, {}, "");
+// }
 
 void PodmanClient::stop(const std::string& container_id) const {
-    auto res = pimpl_->cli_.Post(("/containers/" + container_id + "/stop").c_str());
+    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/stop");
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to stop container");
     }
@@ -178,7 +182,7 @@ void PodmanClient::stop(const std::string& container_id) const {
 }
 
 void PodmanClient::restart(const std::string& container_id) const {
-    auto res = pimpl_->cli_.Post(("/containers/" + container_id + "/restart").c_str());
+    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/restart");
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to restart container");
     }
@@ -195,25 +199,25 @@ void PodmanClient::write(const std::string& container_id, const std::string& inp
     std::cout << "Wrote to container stdin: " << container_id << std::endl;
 }
 
-void PodmanClient::onStdout(std::function<void(const std::string&)> callback) const {
-    pimpl_->onStdoutCallback_ = callback;
+void PodmanClient::onStdout(const std::string& container_id, std::function<void(const std::string&)> callback) const {
+    pimpl_->onStdoutCallbacks_[container_id] = std::move(callback);
 }
 
-void PodmanClient::onStderr(std::function<void(const std::string&)> callback) const {
-    pimpl_->onStderrCallback_ = callback;
+void PodmanClient::onStderr(const std::string& container_id, std::function<void(const std::string&)> callback) const {
+    pimpl_->onStderrCallbacks_[container_id] = std::move(callback);
 }
 
-void PodmanClient::attach(const std::string& container_id) {
+void PodmanClient::attach(const std::string& container_id) const {
     httplib::Headers headers;
     auto res = pimpl_->cli_.Post(
-        ("/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1").c_str(),
+        "/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1",
         headers,
         "",
         "application/vnd.docker.raw-stream",
-        [this](const char *data, size_t data_length) {
+        [this, &container_id](const char *data, size_t data_length) {
             std::string output(data, data_length);
-            if (pimpl_->onStdoutCallback_) pimpl_->onStdoutCallback_(output);
-            if (pimpl_->onStderrCallback_) pimpl_->onStderrCallback_(output);
+            if (pimpl_->onStdoutCallbacks_.contains(container_id)) pimpl_->onStdoutCallbacks_[container_id](output);
+            if (pimpl_->onStderrCallbacks_.contains(container_id)) pimpl_->onStderrCallbacks_[container_id](output);
             return true;
         },
         nullptr

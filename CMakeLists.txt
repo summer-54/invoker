@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.31)
-project(cppTestInvoker)
+project(invoker)
 
 set(CMAKE_CXX_STANDARD 23)
 
@@ -24,7 +24,7 @@ find_package(LibArchive REQUIRED)
 
 link_directories(/home/sizoff/.vcpkg-clion/vcpkg/installed/x64-linux/debug/lib)
 
-add_executable(cppTestInvoker main.cpp lib/lib/socket.cpp lib/lib/socket.hpp asyncProcess.cpp asyncProcess.hpp session.cpp session.hpp lib/podmanClient.cpp lib/podmanClient.hpp)
-target_link_libraries(cppTestInvoker PRIVATE fmt::fmt uv Boost::filesystem Boost::system CURL::libcurl nlohmann_json::nlohmann_json httplib::httplib LibArchive::LibArchive)
-add_executable(client client.cpp lib/lib/socket.cpp lib/lib/socket.hpp lib/operatorApi.cpp lib/operatorApi.hpp)
-target_link_libraries(client PRIVATE fmt::fmt uv)
+add_executable(invoker main.cpp lib/lib/socket.cpp lib/lib/socket.hpp asyncProcess.cpp asyncProcess.hpp session.cpp session.hpp lib/podmanClient.cpp lib/podmanClient.hpp)
+target_link_libraries(invoker PRIVATE fmt::fmt uv Boost::filesystem Boost::system CURL::libcurl nlohmann_json::nlohmann_json httplib::httplib LibArchive::LibArchive)
+add_executable(operator client.cpp lib/lib/socket.cpp lib/lib/socket.hpp lib/operatorApi.cpp lib/operatorApi.hpp)
+target_link_libraries(operator PRIVATE fmt::fmt uv)

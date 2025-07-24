@@ -1,5 +1,8 @@
 #include "session.hpp"
 #include <chrono>
+#include <cstring>
+#include <httplib.h>
+
 #include "lib/podmanClient.hpp"
 #include <iostream>
 #include <sstream>
@@ -13,6 +16,24 @@ PodmanClient podmanClient("http://localhost:8888");
 
 std::string getImageTag(int session, int id) {
     return std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "-" + std::to_string(session) + "-" + std::to_string(id);
+}
+
+int findFreePort(int min, int max = 65535) {
+    for (int port = min; port <= std::min(max, 65535); port++) {
+        httplib::Server svr;
+
+        // Try to bind to the port
+        if (svr.bind_to_port("0.0.0.0", port)) {
+            // Success - port is available
+            svr.stop();
+            return port;
+        }
+
+        // Port in use, try next one
+        svr.stop();
+    }
+
+    throw std::runtime_error("No available port found >= " + std::to_string(min));
 }
 
 int Session::sessionsCount = 0;
@@ -103,23 +124,31 @@ void Session::build(int image, const std::string& context, const std::string& do
     podmanClient.build(tag, context, dockerfilePath);
 }
 
+std::function<void(const std::string&)> stdoutCallback(int id, const std::string& stdout, Socket::Connection* connection) {
+    return [&connection, &id](const std::string& chunk) {
+        connection->write("STDOUT " + std::to_string(id) + '\n' + chunk);
+    };
+}
+
 void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, const std::vector<int>& ports, const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
-    auto tag = podmanClient.create(images[image], {}, {}, env, volumes, initStdin);
-    containers[id] = tag;
-    revContainers[tag] = id;
-    podmanClient.run(tag, {});
+    auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, initStdin);
+    containers[id] = containerId;
+    revContainers[containerId] = id;
+    if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
+    if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
+    if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
 }
 
 void Session::restart(int id) {
-
+    podmanClient.restart(containers[id]);
 }
 
 void Session::stop(int id) {
-
+    podmanClient.stop(containers[id]);
 }
 
 void Session::write(int id, const std::string& chunk) {
-
+    podmanClient.write(containers[id], chunk);
 }
 
 void Session::port(int id, int port) {
