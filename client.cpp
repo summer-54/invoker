@@ -4,7 +4,7 @@
 
 int main() {
     // OperatorApi operatorApi("/tmp/mySocket");
-    OperatorApi::create("/invokerSocket", [](OperatorApi operatorApi) {
+    OperatorApi::create("/invoker.sock", [](OperatorApi operatorApi) {
         auto image = operatorApi.build("/home/sizoff/programming/invoker/test", "./Dockerfile");
         auto template_ = image();
         template_->env["TEST"] = "true";

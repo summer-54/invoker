@@ -1,7 +1,7 @@
-FROM oven/bun:canary
+FROM ubuntu:latest
 
 WORKDIR /operator
 
-COPY ./test.js ./test.js
+COPY ./operator ./operator
 
-CMD ["bun", "./test.js"]
+CMD ["./operator"]
