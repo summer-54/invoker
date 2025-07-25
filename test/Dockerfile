@@ -1,3 +1,3 @@
 FROM ubuntu:latest
 
-CMD ["bash"]
+CMD ["echo", "test"]

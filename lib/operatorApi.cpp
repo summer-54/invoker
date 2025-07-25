@@ -1,6 +1,7 @@
 #include "operatorApi.hpp"
 
 #include <iostream>
+#include <memory>
 #include <utility>
 
 OperatorApi::OperatorApi(Socket::Connection* connection): connection(connection) {
@@ -36,7 +37,7 @@ std::string OperatorApi::stringValue(const Verdict value) {
     return "0";
 }
 
-OperatorApi::ContainerTemplate::ContainerTemplate(const int image, OperatorApi* operatorApi): image(image), operatorApi(operatorApi) {}
+OperatorApi::ContainerTemplate::ContainerTemplate(const int image, const std::shared_ptr<OperatorApi> operatorApi): image(image), operatorApi(operatorApi) {}
 
 void OperatorApi::ContainerTemplate::onStdout(const std::function<void(const std::string&)>& callback) const {
     operatorApi->callbacks.emplace_back([this, callback](const std::string& chunk) {
@@ -69,7 +70,7 @@ OperatorApi::Container* OperatorApi::ContainerTemplate::run() {
     return new OperatorApi::Container(id, this, operatorApi);
 }
 
-OperatorApi::Container::Container(const int id, ContainerTemplate* containerTemplate, OperatorApi* operatorApi): id(id), containerTemplate(containerTemplate), operatorApi(operatorApi) {}
+OperatorApi::Container::Container(const int id, ContainerTemplate* containerTemplate, const std::shared_ptr<OperatorApi> operatorApi): id(id), containerTemplate(containerTemplate), operatorApi(operatorApi) {}
 
 void OperatorApi::Container::onStdout(const std::function<void(const std::string&)>& callback) const {
     operatorApi->callbacks.emplace_back([this, callback](const std::string& chunk) {
@@ -96,22 +97,24 @@ void OperatorApi::Container::write(const std::string& chunk) const {
 }
 
 void OperatorApi::Container::getPort(int port, const std::function<void(int)>& callback) const {
-    bool found = false;
-    operatorApi->callbacks.emplace_back([this, &callback, &found](const std::string& chunk) {
-        if (!found && chunk.starts_with("PORT")) {
-            callback(std::stoi(chunk.substr(5)));
-            found = true;
+    // Use shared_ptr to manage the state
+    auto state = std::make_shared<std::pair<bool, std::function<void(int)>>>(false, callback);
+
+    operatorApi->callbacks.emplace_back([this, state](const std::string& chunk) {
+        if (!state->first && chunk.starts_with("PORT")) {
+            state->second(std::stoi(chunk.substr(5)));
+            state->first = true;
         }
     });
     operatorApi->connection->write("PORT " + std::to_string(id) + '\n' + std::to_string(port));
 }
 
-void OperatorApi::create(const std::string& path, const std::function<void(OperatorApi)>& callback) {
+void OperatorApi::create(const std::string& path, const std::function<void(std::shared_ptr<OperatorApi>)> callback) {
     Socket::Client client;
     auto connection = client.connect(path.c_str());
     connection->onConnected([&connection, &callback] {
-        OperatorApi operatorApi(connection);
-        callback(operatorApi);
+        // OperatorApi operatorApi(connection);
+        callback(std::shared_ptr<OperatorApi>(new OperatorApi(connection)));
     });
     client.run();
 }
@@ -119,8 +122,8 @@ void OperatorApi::create(const std::string& path, const std::function<void(Opera
 std::function<OperatorApi::ContainerTemplate*()> OperatorApi::build(const std::string& context, const std::string& dockerfilePath) {
     int image = imagesCount++;
     connection->write("BUILD " + std::to_string(image) + '\n' + context + '\n' + dockerfilePath);
-    return [&image, this] {
-        return new ContainerTemplate(image, this);
+    return [image, self = shared_from_this()] {
+        return new ContainerTemplate(image, self);
     };
 }
 

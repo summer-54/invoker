@@ -4,9 +4,10 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <memory>
 #include <sstream>
 
-class OperatorApi {
+class OperatorApi: public std::enable_shared_from_this<OperatorApi> {
 public:
     enum class STDOUT {none, onEnd, normal};
 
@@ -28,7 +29,7 @@ protected:
     class ContainerTemplate {
     protected:
         int image;
-        OperatorApi* operatorApi;
+        const std::shared_ptr<OperatorApi> operatorApi;
 
     public:
         STDOUT stdout = STDOUT::normal, stderr = STDOUT::onEnd;
@@ -37,7 +38,7 @@ protected:
         std::map<std::string, std::string> env;
         std::string initStdin;
 
-        explicit ContainerTemplate(int image, OperatorApi* operatorApi);
+        explicit ContainerTemplate(int image, std::shared_ptr<OperatorApi> operatorApi);
 
         void onStdout(const std::function<void(const std::string&)>& callback) const;
         void onStderr(const std::function<void(const std::string&)>& callback) const;
@@ -56,10 +57,10 @@ protected:
     protected:
         int id;
         ContainerTemplate* containerTemplate;
-        OperatorApi* operatorApi;
+        const std::shared_ptr<OperatorApi> operatorApi;
 
     public:
-        explicit Container(int id, ContainerTemplate* containerTemplate, OperatorApi* operatorApi);
+        explicit Container(int id, ContainerTemplate* containerTemplate, std::shared_ptr<OperatorApi> operatorApi);
 
         void onStdout(const std::function<void(const std::string&)>& callback) const;
         void onStderr(const std::function<void(const std::string&)>& callback) const;
@@ -81,7 +82,7 @@ protected:
     };
 
 public:
-    static void create(const std::string& path, const std::function<void(OperatorApi)>& callback);
+    static void create(const std::string& path, std::function<void(std::shared_ptr<OperatorApi>)> callback);
 
     std::function<ContainerTemplate*()> build(const std::string& context, const std::string& dockerfilePath);
 

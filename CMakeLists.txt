@@ -40,3 +40,11 @@ target_link_libraries(invoker PRIVATE fmt::fmt uv Boost::filesystem Boost::syste
 
 add_executable(operator client.cpp lib/lib/socket.cpp lib/lib/socket.hpp lib/operatorApi.cpp lib/operatorApi.hpp)
 target_link_libraries(operator PRIVATE fmt::fmt uv)
+#target_compile_options(operator PRIVATE
+#        -fsanitize=address,undefined,leak
+#        -fno-omit-frame-pointer
+#        -g
+#)
+#target_link_options(operator PRIVATE
+#        -fsanitize=address,undefined,leak
+#)
