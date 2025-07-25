@@ -5,6 +5,7 @@
 #include <random>
 
 const std::string SOCKET_PATH = "/tmp/invoker.sock";
+const std::string SOCKET_INNER_PATH = "/invoker.sock";
 
 std::string randomstring(size_t length) {
     const std::string charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -30,7 +31,8 @@ Task::Task(const std::string& id, const std::string& tarBinaryData): id(id) {
     initToken = randomstring(256);
     auto imageTag = taskImageTag(id);
     podmanClient.buildTar(imageTag, tarBinaryData, "./Dockerfile");
-    operatorContainer = podmanClient.run(imageTag, {}, {}, {{"INIT_TOKEN", initToken}}, {{SOCKET_PATH, "/invoker.sock"}}, {}, "");
+    operatorContainer = podmanClient.run(imageTag, {}, {}, {{"INIT_TOKEN", initToken},
+        {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, {}, "");
 
 }
 

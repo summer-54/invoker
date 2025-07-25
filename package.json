@@ -1,0 +1,13 @@
+{
+  "name": "invoker",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

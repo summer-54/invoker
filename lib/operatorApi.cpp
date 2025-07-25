@@ -109,11 +109,12 @@ void OperatorApi::Container::getPort(int port, const std::function<void(int)>& c
     operatorApi->connection->write("PORT " + std::to_string(id) + '\n' + std::to_string(port));
 }
 
-void OperatorApi::create(const std::string& path, const std::function<void(std::shared_ptr<OperatorApi>)> callback) {
+void OperatorApi::create(const std::string& path, const std::string& initToken, const std::function<void(std::shared_ptr<OperatorApi>)> callback) {
     Socket::Client client;
     auto connection = client.connect(path.c_str());
-    connection->onConnected([&connection, &callback] {
+    connection->onConnected([&connection, &callback, initToken] {
         // OperatorApi operatorApi(connection);
+        connection->write(initToken);
         callback(std::shared_ptr<OperatorApi>(new OperatorApi(connection)));
     });
     client.run();

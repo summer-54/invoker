@@ -82,7 +82,7 @@ protected:
     };
 
 public:
-    static void create(const std::string& path, std::function<void(std::shared_ptr<OperatorApi>)> callback);
+    static void create(const std::string& path, const std::string& initToken, std::function<void(std::shared_ptr<OperatorApi>)> callback);
 
     std::function<ContainerTemplate*()> build(const std::string& context, const std::string& dockerfilePath);
 

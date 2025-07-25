@@ -4,7 +4,8 @@
 
 int main() {
     // OperatorApi operatorApi("/tmp/mySocket");
-    OperatorApi::create("/invoker.sock", [](std::shared_ptr<OperatorApi> operatorApi) {
+    OperatorApi::create(std::getenv("SOCKET_PATH"), std::getenv("INIT_TOKEN"), [](std::shared_ptr<OperatorApi> operatorApi) {
+        std::cerr << std::getenv("SOCKET_PATH") << std::endl << std::getenv("INIT_TOKEN") << std::endl;
         auto image = operatorApi->build("/home/sizoff/programming/invoker/test", "./Dockerfile");
         auto template_ = image();
         template_->env["TEST"] = "true";

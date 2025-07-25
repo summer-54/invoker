@@ -4,6 +4,7 @@
 #include "session.hpp"
 
 extern const std::string SOCKET_PATH;
+extern const std::string SOCKET_INNER_PATH;
 
 class Task {
 protected:
