@@ -35,6 +35,7 @@ public:
     void onStdout(const std::string& container_id, std::function<void(const std::string&)> callback) const;
     void onStderr(const std::string& container_id, std::function<void(const std::string&)> callback) const;
     void attach(const std::string& container_id) const;
+    void createNetwork(const std::string& name) const;
 
 private:
     struct Impl;

@@ -13,7 +13,7 @@ find_package(LibArchive REQUIRED)
 
 link_directories(/home/sizoff/.vcpkg-clion/vcpkg/installed/x64-linux/debug/lib)
 
-add_executable(invoker main.cpp lib/lib/socket.cpp lib/lib/socket.hpp asyncProcess.cpp asyncProcess.hpp session.cpp
+add_executable(invoker main.cpp lib/lib/socket.cpp lib/lib/socket.hpp session.cpp
         session.hpp lib/podmanClient.cpp lib/podmanClient.hpp websocketClient.cpp websocketClient.hpp task.cpp task.hpp
         lib/tar.cpp
         lib/tar.hpp)

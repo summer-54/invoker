@@ -4,6 +4,8 @@
 #include <iostream>
 #include <random>
 
+#include "lib/tar.hpp"
+
 const std::string SOCKET_PATH = "/tmp/invoker.sock";
 const std::string SOCKET_INNER_PATH = "/invoker.sock";
 
@@ -27,12 +29,28 @@ std::string taskImageTag(const std::string& id) {
     return "task-" + id + "-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
+std::string taskNetworkName(const std::string& id, const std::string& network) {
+    return "task-" + id + "-" + network + "-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "-" + randomstring(16);
+}
+
 Task::Task(const std::string& id, const std::string& tarBinaryData): id(id) {
     initToken = randomstring(256);
     auto imageTag = taskImageTag(id);
     podmanClient.buildTar(imageTag, tarBinaryData, "./Dockerfile");
+    Tar tar(tarBinaryData);
+    std::vector<std::string> networks;
+    if (tar.contains("networks") == std::make_pair(true, false)) {
+        std::istringstream stream(tar.extract("networks"));
+        do {
+            networks.emplace_back();
+        } while (stream >> networks.back());
+        networks.pop_back();
+        for (const auto& network : networks) this->networks[network] = taskNetworkName(id, network);
+        for (auto& network : networks) network = this->networks[network];
+    }
+    for (const auto& network : networks) podmanClient.createNetwork(network);
     operatorContainer = podmanClient.run(imageTag, {}, {}, {{"INIT_TOKEN", initToken},
-        {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, {}, "");
+        {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, networks, "");
 }
 
 Task::~Task() = default;

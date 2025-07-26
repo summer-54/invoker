@@ -34,7 +34,7 @@ int findFreePort(int min, int max = 65535) {
 
 int Session::sessionsCount = 0;
 
-Session::Session(const int id): id(id) {}
+Session::Session(const std::map<std::string, std::string>& networks, const std::shared_ptr<Socket::Connection*>& connection, const int id): id(id), connection(connection), networks(networks) {}
 
 void Session::onData(std::string data) {
     std::cout << "Received: " << data << '\n' << std::endl;
@@ -51,19 +51,13 @@ void Session::onData(std::string data) {
     else if (type == "RUN") {
         int id, imageId; stream >> id >> imageId;
         std::string stdout = "normal", stderr = "onEnd", subtype;
-        std::vector<int> ports;
         std::vector<std::pair<std::string, std::string>> volumes;
         std::map<std::string, std::string> env;
+        std::vector<std::string> networks;
         std::string initStdin;
         while (stream >> subtype) {
             if (subtype == "STDOUT") stream >> stdout;
             else if (subtype == "STDERR") stream >> stderr;
-            else if (subtype == "PORTS") {
-                std::string portsStr; std::getline(stream, portsStr);
-                std::istringstream stream0(portsStr);
-                int port;
-                while (stream0 >> port) ports.push_back(port);
-            }
             else if (subtype == "VOLUME") {
                 std::string from, to;
                 std::getline(stream, from);
@@ -78,6 +72,12 @@ void Session::onData(std::string data) {
                 value.erase(0, 1);
                 env.emplace(key, value);
             }
+            else if (subtype == "NETWORK") {
+                std::string network;
+                std::getline(stream, network);
+                network.erase(0, 1);
+                networks.push_back(network);
+            }
             else if (subtype == "WRITE") {
                 std::string tmp; std::getline(stream, tmp);
                 while (std::getline(stream, tmp)) initStdin += tmp;
@@ -86,7 +86,7 @@ void Session::onData(std::string data) {
                 std::cout << "Error: " << subtype << '\n' << std::endl;
             }
         }
-        run(id, imageId, stdout, stderr, ports, volumes, env, initStdin);
+        run(id, imageId, stdout, stderr, networks, volumes, env, initStdin);
     }
     else if (type == "RESTART") {
         int id; stream >> id;
@@ -120,26 +120,26 @@ void Session::onData(std::string data) {
 }
 
 void Session::build(int image, const std::string& context, const std::string& dockerfilePath) {
-    std::cerr << "build\n";
     auto tag = getImageTag(id, image);
     images[image] = tag;
     revImages[tag] = image;
     podmanClient.build(tag, context, dockerfilePath);
 }
 
-std::function<void(const std::string&)> stdoutCallback(int id, const std::string& stdout, Socket::Connection* connection) {
+std::function<void(const std::string&)> stdoutCallback(int id, const std::string& stdout, std::shared_ptr<Socket::Connection*> connection) {
     return [&connection, &id](const std::string& chunk) {
-        connection->write("STDOUT " + std::to_string(id) + '\n' + chunk);
+        (*connection)->write("STDOUT " + std::to_string(id) + '\n' + chunk);
     };
 }
 
-void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, const std::vector<int>& ports, const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
-    auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, {}, initStdin);
+void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, std::vector<std::string> networks, const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
+    for (auto& network : networks) network = this->networks[network];
+    auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, networks, initStdin);
     containers[id] = containerId;
     revContainers[containerId] = id;
     if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
-    // if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
-    // if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
+    if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
+    if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
 }
 
 void Session::restart(int id) {

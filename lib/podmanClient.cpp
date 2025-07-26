@@ -247,3 +247,14 @@ void PodmanClient::attach(const std::string& container_id) const {
         throw std::runtime_error("Failed to attach to container");
     }
 }
+
+void PodmanClient::createNetwork(const std::string& name) const {
+    nlohmann::json body = {
+        {"Name", name}
+    };
+    auto res = pimpl_->cli_.Post("/networks/create", body.dump(), "application/json");
+    if (!res || res->status != 201) {
+        throw std::runtime_error("Failed to create network");
+    }
+    std::cout << "Network created: " << name << std::endl;
+}

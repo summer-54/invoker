@@ -58,13 +58,9 @@ OperatorApi::Container* OperatorApi::ContainerTemplate::run() {
     int id = operatorApi->containersCount++;
     stream << "RUN " << id << '\n' << image << '\n' << "STDOUT " << stringValue(stdout) << '\n'
         << "STDERR " << stringValue(stderr) << '\n';
-    if (!ports.empty()) {
-        stream << "PORTS";
-        for (int port : ports) stream << ' ' << port;
-        stream << '\n';
-    }
     for (const auto& [a, b] : volumes) stream << "VOLUME " << a << '\n' << b << '\n';
     for (const auto& [a, b] : env) stream << "ENV " << a << ' ' << b << '\n';
+    for (const auto& network : networks) stream << "NETWORK " << network << '\n';
     if (!initStdin.empty()) stream << "WRITE\n" << initStdin;
     std::string chunk = stream.str();
     chunk.pop_back();

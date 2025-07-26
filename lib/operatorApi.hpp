@@ -33,9 +33,9 @@ protected:
 
     public:
         STDOUT stdout = STDOUT::normal, stderr = STDOUT::onEnd;
-        std::vector<int> ports;
         std::vector<std::pair<std::string, std::string>> volumes;
         std::map<std::string, std::string> env;
+        std::vector<std::string> networks;
         std::string initStdin;
 
         explicit ContainerTemplate(int image, std::shared_ptr<OperatorApi> operatorApi);

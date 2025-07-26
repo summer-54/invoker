@@ -12,7 +12,8 @@ protected:
     std::string initToken, operatorContainer;
 
 public:
-    Session* session = nullptr;
+    std::shared_ptr<Session*> session = nullptr;
+    std::map<std::string, std::string> networks;
 
     Task(const std::string& id, const std::string& tarBinaryData);
     ~Task();
