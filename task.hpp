@@ -17,8 +17,6 @@ public:
     Task(const std::string& id, const std::string& tarBinaryData);
     ~Task();
 
-    void tryConnection(const std::string& init, Socket::Connection* connection);
-
     void stop();
 
     std::string getToken();

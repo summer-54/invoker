@@ -14,7 +14,9 @@ find_package(LibArchive REQUIRED)
 link_directories(/home/sizoff/.vcpkg-clion/vcpkg/installed/x64-linux/debug/lib)
 
 add_executable(invoker main.cpp lib/lib/socket.cpp lib/lib/socket.hpp asyncProcess.cpp asyncProcess.hpp session.cpp
-        session.hpp lib/podmanClient.cpp lib/podmanClient.hpp websocketClient.cpp websocketClient.hpp task.cpp task.hpp)
+        session.hpp lib/podmanClient.cpp lib/podmanClient.hpp websocketClient.cpp websocketClient.hpp task.cpp task.hpp
+        lib/tar.cpp
+        lib/tar.hpp)
 target_link_libraries(invoker PRIVATE fmt::fmt uv Boost::filesystem Boost::system CURL::libcurl nlohmann_json::nlohmann_json httplib::httplib LibArchive::LibArchive)
 target_compile_options(invoker PRIVATE
         -fsanitize=address,undefined,leak

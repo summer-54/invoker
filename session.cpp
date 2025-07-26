@@ -8,11 +8,7 @@
 #include <sstream>
 #include "lib/lib/socket.hpp"
 
-#ifdef PODMAN_SOCKET
-PodmanClient podmanClient(PODMAN_SOCKET);
-#else
-PodmanClient podmanClient("http://localhost:8888");
-#endif
+PodmanClient podmanClient(std::getenv("PODMAN_SOCKET") == nullptr ? "http://localhost:8888" : std::getenv("PODMAN_SOCKET"));
 
 std::string getImageTag(int session, int id) {
     return std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "-" + std::to_string(session) + "-" + std::to_string(id);
