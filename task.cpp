@@ -40,7 +40,7 @@ Task::~Task() = default;
 void Task::tryConnection(const std::string& init, Socket::Connection* connection) {
     std::cerr << init << '\n' << initToken << std::endl;
     if (init != initToken) return;
-    session = new Session(connection);
+    // session = new Session();
 }
 
 void Task::stop() {

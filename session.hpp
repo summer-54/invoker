@@ -13,12 +13,13 @@ protected:
     static int sessionsCount;
 
     int id;
-    Socket::Connection* connection;
     std::map<int, std::string> images, containers;
     std::map<std::string, int> revImages, revContainers;
 
 public:
-    explicit Session(Socket::Connection* connection, int id = sessionsCount++);
+    explicit Session(int id = sessionsCount++);
+
+    void onData(std::string data);
 
     void build(int image, const std::string& context, const std::string& dockerfilePath);
 

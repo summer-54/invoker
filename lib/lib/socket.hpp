@@ -15,6 +15,7 @@ namespace Socket {
         std::function<void()> closeCallback;
         std::function<void()> connectedCallback;
         std::vector<char> buffer;  // Added for accumulating incoming data
+        void* data = nullptr;
 
         Connection(uv_stream_t* s, bool isConnected);
         ~Connection();

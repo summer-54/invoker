@@ -133,7 +133,10 @@ namespace Socket {
         pipe = new uv_pipe_t;
         uv_pipe_init(loop, pipe, 0);
         pipe->data = this;
-        uv_pipe_bind(pipe, path);
+        int bind_result = uv_pipe_bind(pipe, path);
+        if (bind_result < 0) {
+            std::cerr << "Failed to bind to socket path '" << path << "': " << uv_strerror(bind_result) << std::endl;
+        }
     }
 
     Server::~Server() {

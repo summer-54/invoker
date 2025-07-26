@@ -38,93 +38,89 @@ int findFreePort(int min, int max = 65535) {
 
 int Session::sessionsCount = 0;
 
-Session::Session(Socket::Connection* connection, const int id): connection(connection), id(id) {
-    connection->onData([this](const char* data, size_t len) {
-            std::cout << "Received: " << std::string(data, len) << '\n' << std::endl;
-            auto chunk = std::string(data, len);
-            std::istringstream stream(chunk);
-            std::string type; stream >> type;
-            if (type == "BUILD") {
-                int imageId; stream >> imageId;
-                std::string context, dockerfile;
-                std::getline(stream, context);
-                std::getline(stream, context);
-                std::getline(stream, dockerfile);
-                build(imageId, context, dockerfile);
-            }
-            else if (type == "RUN") {
-                int id, imageId; stream >> id >> imageId;
-                std::string stdout = "normal", stderr = "onEnd", subtype;
-                std::vector<int> ports;
-                std::vector<std::pair<std::string, std::string>> volumes;
-                std::map<std::string, std::string> env;
-                std::string initStdin;
-                while (stream >> subtype) {
-                    if (subtype == "STDOUT") stream >> stdout;
-                    else if (subtype == "STDERR") stream >> stderr;
-                    else if (subtype == "PORTS") {
-                        std::string portsStr; std::getline(stream, portsStr);
-                        std::istringstream stream0(portsStr);
-                        int port;
-                        while (stream0 >> port) ports.push_back(port);
-                    }
-                    else if (subtype == "VOLUME") {
-                        std::string from, to;
-                        std::getline(stream, from);
-                        std::getline(stream, to);
-                        from.erase(0, 1);
-                        volumes.emplace_back(from, to);
-                    }
-                    else if (subtype == "ENV") {
-                        std::string key, value;
-                        stream >> key;
-                        std::getline(stream, value);
-                        value.erase(0, 1);
-                        env.emplace(key, value);
-                    }
-                    else if (subtype == "WRITE") {
-                        std::string tmp; std::getline(stream, tmp);
-                        while (std::getline(stream, tmp)) initStdin += tmp;
-                    }
-                    else {
-                        std::cout << "Error: " << subtype << '\n' << std::endl;
-                    }
-                }
-                run(id, imageId, stdout, stderr, ports, volumes, env, initStdin);
-            }
-            else if (type == "RESTART") {
-                int id; stream >> id;
-                restart(id);
-            }
-            else if (type == "STOP") {
-                int id; stream >> id;
-                stop(id);
-            }
-            else if (type == "WRITE") {
-                int id; stream >> id;
-                std::string buffer, tmp;
-                while (std::getline(stream, tmp)) buffer += tmp;
-                write(id, buffer);
-            }
-            else if (type == "VERDICT") {
-                std::string verdict, sub, subtask, data_; stream >> verdict >> sub;
-                if (sub == "SUB") {
-                    std::getline(stream, subtask);
-                    stream >> sub;
-                }
-                if (sub == "DATA") {
-                    std::string tmp; std::getline(stream, tmp);
-                    while (std::getline(stream, tmp)) data_ += tmp;
-                }
+Session::Session(const int id): id(id) {}
 
+void Session::onData(std::string data) {
+    std::cout << "Received: " << data << '\n' << std::endl;
+    std::istringstream stream(data);
+    std::string type; stream >> type;
+    if (type == "BUILD") {
+        int imageId; stream >> imageId;
+        std::string context, dockerfile;
+        std::getline(stream, context);
+        std::getline(stream, context);
+        std::getline(stream, dockerfile);
+        build(imageId, context, dockerfile);
+    }
+    else if (type == "RUN") {
+        int id, imageId; stream >> id >> imageId;
+        std::string stdout = "normal", stderr = "onEnd", subtype;
+        std::vector<int> ports;
+        std::vector<std::pair<std::string, std::string>> volumes;
+        std::map<std::string, std::string> env;
+        std::string initStdin;
+        while (stream >> subtype) {
+            if (subtype == "STDOUT") stream >> stdout;
+            else if (subtype == "STDERR") stream >> stderr;
+            else if (subtype == "PORTS") {
+                std::string portsStr; std::getline(stream, portsStr);
+                std::istringstream stream0(portsStr);
+                int port;
+                while (stream0 >> port) ports.push_back(port);
+            }
+            else if (subtype == "VOLUME") {
+                std::string from, to;
+                std::getline(stream, from);
+                std::getline(stream, to);
+                from.erase(0, 1);
+                volumes.emplace_back(from, to);
+            }
+            else if (subtype == "ENV") {
+                std::string key, value;
+                stream >> key;
+                std::getline(stream, value);
+                value.erase(0, 1);
+                env.emplace(key, value);
+            }
+            else if (subtype == "WRITE") {
+                std::string tmp; std::getline(stream, tmp);
+                while (std::getline(stream, tmp)) initStdin += tmp;
             }
             else {
-                std::cout << "Unknown type: " << type << std::endl;
+                std::cout << "Error: " << subtype << '\n' << std::endl;
             }
-        });
-        connection->onClose([] {
-            std::cout << "Connection closed" << '\n' << std::endl;
-        });
+        }
+        run(id, imageId, stdout, stderr, ports, volumes, env, initStdin);
+    }
+    else if (type == "RESTART") {
+        int id; stream >> id;
+        restart(id);
+    }
+    else if (type == "STOP") {
+        int id; stream >> id;
+        stop(id);
+    }
+    else if (type == "WRITE") {
+        int id; stream >> id;
+        std::string buffer, tmp;
+        while (std::getline(stream, tmp)) buffer += tmp;
+        write(id, buffer);
+    }
+    else if (type == "VERDICT") {
+        std::string verdict, sub, subtask, data_; stream >> verdict >> sub;
+        if (sub == "SUB") {
+            std::getline(stream, subtask);
+            stream >> sub;
+        }
+        if (sub == "DATA") {
+            std::string tmp; std::getline(stream, tmp);
+            while (std::getline(stream, tmp)) data_ += tmp;
+        }
+
+    }
+    else {
+        std::cout << "Unknown type: " << type << std::endl;
+    }
 }
 
 void Session::build(int image, const std::string& context, const std::string& dockerfilePath) {
@@ -146,8 +142,8 @@ void Session::run(int id, int image, const std::string& stdout, const std::strin
     containers[id] = containerId;
     revContainers[containerId] = id;
     if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
-    if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
-    if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
+    // if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
+    // if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
 }
 
 void Session::restart(int id) {
