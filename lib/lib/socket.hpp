@@ -10,7 +10,7 @@ namespace Socket {
     class Connection {
     public:
         uv_stream_t* stream;
-        bool connected;
+        bool connected, dataCallbackSet = false;
         std::function<void(const char*, size_t)> dataCallback;
         std::function<void()> closeCallback;
         std::function<void()> connectedCallback;

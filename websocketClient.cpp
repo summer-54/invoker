@@ -1,276 +1,84 @@
 #include "websocketClient.hpp"
+#include <fstream>
 #include <iostream>
 #include <sstream>
-#include <boost/asio/connect.hpp>
-#include <boost/asio/ip/tcp.hpp>
+#include <iterator>    // For std::begin, std::end
+#include <string_view> // For std::string_view
+#include <algorithm>   // For std::search, std::boyer_moore_searcher
 
-using namespace std::chrono_literals;
+void writeStringToFile(const std::string& data, const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Cannot create file: " + filename);
+    }
 
-WebSocketClient::WebSocketClient(const std::string& uri)
-    : uri_(uri),
-      ws_(net::make_strand(ioc_)),
-      strand_(ws_.get_executor()) {
-    parse_uri();
+    file.write(data.data(), data.size());
+
+    if (!file) {
+        throw std::runtime_error("Error writing to file: " + filename);
+    }
 }
+
+WebSocketClient::WebSocketClient(const std::string& uri) : uri_(uri), connected_(false), ws_(ioc_) {}
 
 WebSocketClient::~WebSocketClient() {
     disconnect();
 }
 
-void WebSocketClient::parse_uri() {
-    // Simple URI parser (ws://host:port/path)
-    auto pos = uri_.find("://");
-    if (pos == std::string::npos) {
-        throw std::invalid_argument("Invalid URI");
-    }
-
-    auto path_start = uri_.find('/', pos + 3);
-    if (path_start == std::string::npos) {
-        host_ = uri_.substr(pos + 3);
-        path_ = "/";
-    } else {
-        host_ = uri_.substr(pos + 3, path_start - pos - 3);
-        path_ = uri_.substr(path_start);
-    }
-
-    auto colon_pos = host_.find(':');
-    if (colon_pos != std::string::npos) {
-        port_ = host_.substr(colon_pos + 1);
-        host_ = host_.substr(0, colon_pos);
-    } else {
-        port_ = "80";
-    }
-}
-
 bool WebSocketClient::connect() {
-    if (connected_) return true;
-
-    stopping_ = false;
-    connect_done_ = false;
-
-    // Start I/O context thread
-    ioc_thread_ = std::make_unique<std::thread>([this]() { run_io_context(); });
-
-    // Start connection process
-    net::post(strand_, [this]() {
-        tcp::resolver resolver(net::make_strand(ioc_));
-        resolver.async_resolve(
-            host_, port_,
-            beast::bind_front_handler(
-                &WebSocketClient::on_resolve,
-                this
-            )
-        );
-    });
-
-    // Wait for connection with timeout
-    std::unique_lock<std::mutex> lock(connect_mutex_);
-    if (!connect_cv_.wait_for(lock, 30s, [this] { return connect_done_; })) {
-        std::cerr << "Connection timeout" << std::endl;
-        disconnect();
-        return false;
-    }
-
-    return connected_;
-}
-
-void WebSocketClient::on_resolve(
-    beast::error_code ec,
-    tcp::resolver::results_type results) {
-    if (ec) {
-        std::cerr << "Resolve error: " << ec.message() << std::endl;
-        return;
-    }
-
-    // Set timeout
-    beast::get_lowest_layer(ws_).expires_after(30s);
-
-    // Async connect
-    beast::get_lowest_layer(ws_).async_connect(
-        results,
-        beast::bind_front_handler(
-            &WebSocketClient::on_connect,
-            this
-        )
-    );
-}
-
-void WebSocketClient::on_connect(
-    beast::error_code ec,
-    tcp::resolver::results_type::endpoint_type ep) {
-    if (ec) {
-        std::cerr << "Connect error: " << ec.message() << std::endl;
-        return;
-    }
-
-    // Disable timeout
-    beast::get_lowest_layer(ws_).expires_never();
-
-    // Set suggested timeout settings
-    ws_.set_option(
-        websocket::stream_base::timeout::suggested(
-            beast::role_type::client
-        )
-    );
-
-    // Set host for WebSocket handshake
-    std::string host = host_ + ':' + std::to_string(ep.port());
-
-    // Async handshake
-    ws_.async_handshake(
-        host, path_,
-        beast::bind_front_handler(
-            &WebSocketClient::on_handshake,
-            this
-        )
-    );
-}
-
-void WebSocketClient::on_handshake(beast::error_code ec) {
-    if (ec) {
-        std::cerr << "Handshake error: " << ec.message() << std::endl;
-        return;
-    }
-
-    connected_ = true;
-    std::cout << "Connected to " << uri_ << std::endl;
-
-    {
-        std::lock_guard<std::mutex> lock(connect_mutex_);
-        connect_done_ = true;
-    }
-    connect_cv_.notify_one();
-
-    start_read();
-}
-
-void WebSocketClient::start_read() {
-    ws_.async_read(
-        read_buffer_,
-        beast::bind_front_handler(
-            &WebSocketClient::on_read,
-            this
-        )
-    );
-}
-
-void WebSocketClient::on_read(
-    beast::error_code ec,
-    size_t bytes_transferred) {
-    if (ec == websocket::error::closed) {
-        std::cout << "WebSocket connection closed" << std::endl;
-        connected_ = false;
-        return;
-    } else if (ec) {
-        std::cerr << "Read error: " << ec.message() << std::endl;
-        connected_ = false;
-        return;
-    }
-
     try {
-        std::string payload = beast::buffers_to_string(read_buffer_.data());
-        read_buffer_.consume(bytes_transferred);
-        std::cerr << "Received message: " << payload << std::endl;
-        processIncomingMessage(payload);
+        // Parse URI
+        size_t pos = uri_.find("://");
+        if (pos == std::string::npos) throw std::runtime_error("Invalid URI");
+        std::string scheme = uri_.substr(0, pos);
+        if (scheme != "ws") throw std::runtime_error("Only ws scheme supported");
+        std::string host_port_path = uri_.substr(pos + 3);
+        pos = host_port_path.find('/');
+        std::string host_port = (pos == std::string::npos) ? host_port_path : host_port_path.substr(0, pos);
+        std::string path = (pos == std::string::npos) ? "/" : host_port_path.substr(pos);
+        pos = host_port.find(':');
+        std::string host = (pos == std::string::npos) ? host_port : host_port.substr(0, pos);
+        std::string port = (pos == std::string::npos) ? "80" : host_port.substr(pos + 1);
+
+        // Resolve host
+        tcp::resolver resolver(ioc_);
+        auto results = resolver.resolve(host, port);
+
+        // Connect socket
+        net::connect(ws_.next_layer(), results);
+
+        // Perform handshake
+        ws_.handshake(host, path);
+
+        // Set connected flag
+        connected_ = true;
+        std::cout << "Connected to " + uri_ << std::endl;
+
+        // Start read loop
+        startReadLoop();
+
+        // Start io_context in a separate thread
+        client_thread_ = std::make_unique<std::thread>([this] { ioc_.run(); });
+
+        return true;
     } catch (const std::exception& e) {
-        std::cerr << "Exception processing message: " << e.what() << std::endl;
-    }
-
-    if (connected_) {
-        start_read();
-    }
-}
-
-bool WebSocketClient::sendWebSocketMessage(const std::string& message) {
-    if (!connected_) {
-        std::cerr << "Not connected to server" << std::endl;
+        std::cerr << "Exception during connection: " << e.what() << std::endl;
         return false;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(write_mutex_);
-        write_queue_.push(message);
-    }
-
-    net::post(strand_, [this]() {
-        if (!writing_) {
-            do_write();
-        }
-    });
-
-    return true;
-}
-
-void WebSocketClient::do_write() {
-    if (stopping_ || !connected_) return;
-
-    std::lock_guard<std::mutex> lock(write_mutex_);
-    if (write_queue_.empty()) {
-        writing_ = false;
-        return;
-    }
-
-    writing_ = true;
-    auto message = write_queue_.front();
-    write_queue_.pop();
-
-    ws_.async_write(
-        net::buffer(message),
-        beast::bind_front_handler(
-            &WebSocketClient::on_write,
-            this
-        )
-    );
-}
-
-void WebSocketClient::on_write(
-    beast::error_code ec,
-    size_t bytes_transferred) {
-    if (ec) {
-        std::cerr << "Write error: " << ec.message() << std::endl;
-        connected_ = false;
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(write_mutex_);
-    if (!write_queue_.empty()) {
-        do_write();
-    } else {
-        writing_ = false;
     }
 }
 
 void WebSocketClient::disconnect() {
-    if (stopping_) return;
-    stopping_ = true;
-
-    net::post(strand_, [this]() {
-        beast::error_code ec;
-        if (ws_.is_open()) {
-            ws_.close(websocket::close_code::normal, ec);
+    if (connected_) {
+        ws_.async_close(websocket::close_code::normal, [this](beast::error_code ec) {
             if (ec) {
                 std::cerr << "Error closing connection: " << ec.message() << std::endl;
             }
-        }
-        connected_ = false;
-        ioc_.stop();
-    });
-
-    if (ioc_thread_ && ioc_thread_->joinable()) {
-        ioc_thread_->join();
+            connected_ = false;
+        });
     }
-
-    // Clear write queue
-    std::lock_guard<std::mutex> lock(write_mutex_);
-    std::queue<std::string> empty;
-    std::swap(write_queue_, empty);
-}
-
-void WebSocketClient::run_io_context() {
-    try {
-        ioc_.run();
-    } catch (const std::exception& e) {
-        std::cerr << "I/O context error: " << e.what() << std::endl;
+    ioc_.stop();
+    if (client_thread_ && client_thread_->joinable()) {
+        client_thread_->join();
     }
 }
 
@@ -278,7 +86,92 @@ bool WebSocketClient::isConnected() const {
     return connected_;
 }
 
-// Message formatting functions remain unchanged from original implementation
+void WebSocketClient::startReadLoop() {
+    ws_.binary(true); // Set WebSocket to binary mode
+    ws_.async_read(buffer_, [this](beast::error_code ec, std::size_t bytes_transferred) {
+        if (!ec) {
+            // Convert buffer sequence to string and then to vector<char> for binary safety
+            std::string data_str = beast::buffers_to_string(buffer_.data());
+            std::vector<char> data(data_str.begin(), data_str.end());
+            buffer_.consume(bytes_transferred);
+            onMessage(std::move(data)); // Pass raw bytes to onMessage
+            startReadLoop();
+        } else if (ec == websocket::error::closed) {
+            onClose();
+        } else {
+            onFail();
+        }
+    });
+}
+
+void WebSocketClient::onOpen() {
+    std::cout << "WebSocket connection opened" << std::endl;
+    connected_ = true;
+}
+
+void WebSocketClient::onClose() {
+    std::cout << "WebSocket connection closed" << std::endl;
+    connected_ = false;
+}
+
+void WebSocketClient::onMessage(std::vector<char> data) {
+    std::cout << "WebSocket message received" << std::endl;
+    // Parse taskId and type from the beginning of the data
+    auto header_end = std::find(data.begin(), data.end(), '\n');
+    if (header_end == data.end()) {
+        std::cerr << "Invalid message: no header found" << std::endl;
+        return;
+    }
+    std::string header(data.begin(), data.end());
+    std::istringstream stream(header);
+    std::string taskId, type;
+    stream >> taskId >> type;
+    if (type == "START") {
+        // Extract binary data after "START\n"
+        auto start_pos = std::search(
+            data.begin(), data.end(),
+            std::boyer_moore_searcher("START\n", "START\n" + 6) // Use const char* instead of sv
+        );
+        if (start_pos != data.end()) {
+            std::vector<char> tar(start_pos + 6, data.end());
+            std::string tar_str(tar.begin(), tar.end());
+            writeStringToFile(tar_str, "./test0.tar.gz");
+            std::lock_guard<std::mutex> lock(tasks_mutex_);
+            if (tasks_.contains(taskId)) {
+                std::cerr << "Task exists " << taskId << std::endl;
+                return;
+            }
+            tasks_[taskId] = new Task(taskId, tar_str);
+        }
+    }
+}
+
+void WebSocketClient::onFail() {
+    std::cerr << "WebSocket connection failed" << std::endl;
+    connected_ = false;
+}
+
+void WebSocketClient::processIncomingMessage(const std::string& message) {
+
+}
+
+bool WebSocketClient::sendWebSocketMessage(const std::string& message) {
+    if (!connected_) {
+        std::cerr << "Not connected to server" << std::endl;
+        return false;
+    }
+    net::post(ioc_, [this, message] {
+        ws_.async_write(net::buffer(message), [this, message](beast::error_code ec, std::size_t) {
+            if (ec) {
+                std::cerr << "Error sending message: " << ec.message() << std::endl;
+            } else {
+                std::cerr << "Sent message: " << message << std::endl;
+            }
+        });
+    });
+    return true;
+}
+
 std::string WebSocketClient::formatFullVerdictMessage(const std::string& taskId, const std::string& verdict, const std::string& data) {
     std::ostringstream oss;
     oss << taskId << '\n';
@@ -312,29 +205,6 @@ std::string WebSocketClient::formatErrorMessage(const std::string& taskId, const
     return oss.str();
 }
 
-// Message processing remains unchanged from original implementation
-void WebSocketClient::processIncomingMessage(const std::string& message) {
-    std::istringstream stream(message);
-    std::string taskId; std::string type; stream >> taskId >> type;;
-    if (type == "START") {
-        auto tar = message.substr(message.find("START") + 5);
-        if (tasks_.contains(taskId)) {
-            std::cerr << "Task exists " << taskId << std::endl;
-            return;
-        }
-        Task task(taskId, tar);
-        tasks_[taskId] = std::make_shared<Task>(task);
-    }
-    else if (type == "STOP") {
-        if (!tasks_.contains(taskId)) {
-            std::cerr << "Task don't exists " << taskId << std::endl;
-            return;
-        }
-        tasks_[taskId]->stop();
-    }
-}
-
-// Send methods remain unchanged from original implementation
 bool WebSocketClient::sendFullVerdict(const std::string& taskId, const std::string& verdict, const std::string& data) {
     std::string message = formatFullVerdictMessage(taskId, verdict, data);
     return sendWebSocketMessage(message);
@@ -358,4 +228,11 @@ bool WebSocketClient::sendInvokerError(const std::string& taskId, const std::str
 bool WebSocketClient::sendOperatorError(const std::string& taskId, const std::string& errorMessage) {
     std::string message = formatErrorMessage(taskId, "OPERROR", errorMessage);
     return sendWebSocketMessage(message);
+}
+
+void WebSocketClient::forEachTask(std::function<void(Task*)> func) {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+    for (auto& pair : tasks_) {
+        func(pair.second);
+    }
 }

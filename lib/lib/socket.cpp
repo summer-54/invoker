@@ -50,7 +50,8 @@ namespace Socket {
 
     void Connection::onData(const std::function<void(const char*, size_t)>& cb) {
         dataCallback = cb;
-        if (connected) {
+        if (connected && !dataCallbackSet) {
+            dataCallbackSet = true;
             uv_read_start(stream,
                 [](uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
                     buf->base = new char[suggested_size];

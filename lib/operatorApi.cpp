@@ -2,7 +2,9 @@
 
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <utility>
+#include <chrono>
 
 OperatorApi::OperatorApi(Socket::Connection* connection): connection(connection) {
     connection->onData([this](const char* chunk, int length) {
@@ -113,7 +115,8 @@ void OperatorApi::create(const std::string& path, const std::string& initToken, 
     Socket::Client client;
     auto connection = client.connect(path.c_str());
     connection->onConnected([&connection, &callback, initToken] {
-        // OperatorApi operatorApi(connection);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::cerr << initToken << '\n';
         connection->write(initToken);
         callback(std::shared_ptr<OperatorApi>(new OperatorApi(connection)));
     });

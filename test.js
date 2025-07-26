@@ -20,7 +20,10 @@ Bun.serve({
         open(ws) {
             console.log('WebSocket connection opened');
             // ws.send('Welcome to /invoker WebSocket!');
-            ws.send("0\nSTART\n" + fs.readFileSync("./test.tar.json"))
+            const fileData = fs.readFileSync("./test.tar.gz");
+            const message = new TextEncoder().encode("0\nSTART\n"); // Encode text prefix
+            const combined = new Uint8Array([...message, ...fileData]); // Combine prefix and binary data
+            ws.send(combined); // Send as binary
         },
 
         message(ws, message) {

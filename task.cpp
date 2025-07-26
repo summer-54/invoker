@@ -33,15 +33,20 @@ Task::Task(const std::string& id, const std::string& tarBinaryData): id(id) {
     podmanClient.buildTar(imageTag, tarBinaryData, "./Dockerfile");
     operatorContainer = podmanClient.run(imageTag, {}, {}, {{"INIT_TOKEN", initToken},
         {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, {}, "");
-
 }
 
 Task::~Task() = default;
 
 void Task::tryConnection(const std::string& init, Socket::Connection* connection) {
-
+    std::cerr << init << '\n' << initToken << std::endl;
+    if (init != initToken) return;
+    session = new Session(connection);
 }
 
 void Task::stop() {
 
+}
+
+std::string Task::getToken() {
+    return initToken;
 }
