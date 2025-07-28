@@ -1,6 +1,5 @@
 #include "session.hpp"
 #include <chrono>
-#include <cstring>
 #include <httplib.h>
 
 #include "lib/podmanClient.hpp"
@@ -12,6 +11,10 @@ PodmanClient podmanClient(std::getenv("PODMAN_SOCKET") == nullptr ? "http://loca
 
 std::string getImageTag(int session, int id) {
     return std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "-" + std::to_string(session) + "-" + std::to_string(id);
+}
+
+std::string getContainerName(int session, int id, int image) {
+    return std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "_" + std::to_string(session) + "_" + std::to_string(image) + "_" + std::to_string(id);
 }
 
 int findFreePort(int min, int max = 65535) {
@@ -102,6 +105,10 @@ void Session::onData(std::string data) {
         while (std::getline(stream, tmp)) buffer += tmp;
         write(id, buffer);
     }
+    else if (type == "HOST") {
+        int id; stream >> id;
+        getHost(id);
+    }
     else if (type == "VERDICT") {
         std::string verdict, sub, subtask, data_; stream >> verdict >> sub;
         if (sub == "SUB") {
@@ -154,8 +161,8 @@ void Session::write(int id, const std::string& chunk) {
     podmanClient.write(containers[id], chunk);
 }
 
-void Session::port(int id, int port) {
-
+void Session::getHost(int id) {
+    (*connection)->write("HOST " + podmanClient.getName(containers[id]));
 }
 
 void Session::verdict(int id, const std::string& sub, const std::string& data) {

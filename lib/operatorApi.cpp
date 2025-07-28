@@ -7,9 +7,13 @@
 #include <chrono>
 
 OperatorApi::OperatorApi(Socket::Connection* connection): connection(connection) {
-    connection->onData([this](const char* chunk, int length) {
+}
+
+void OperatorApi::init() {
+    connection->onData([self = shared_from_this()](const char* chunk, int length) {
         std::string data(chunk, length);
-        for (const auto& callback : this->callbacks) {
+        std::cout << "Received: " << data << std::endl;
+        for (const auto& callback : self->callbacks) {
             callback(data);
         }
     });
@@ -94,17 +98,16 @@ void OperatorApi::Container::write(const std::string& chunk) const {
     operatorApi->connection->write("RESTART " + std::to_string(id) + '\n' + chunk);
 }
 
-void OperatorApi::Container::getPort(int port, const std::function<void(int)>& callback) const {
-    // Use shared_ptr to manage the state
-    auto state = std::make_shared<std::pair<bool, std::function<void(int)>>>(false, callback);
-
+void OperatorApi::Container::getHost(const std::function<void(const std::string&)>& callback) const {
+    auto state = std::make_shared<std::pair<bool, std::function<void(const std::string&)>>>(std::make_pair(false, callback));
     operatorApi->callbacks.emplace_back([this, state](const std::string& chunk) {
-        if (!state->first && chunk.starts_with("PORT")) {
-            state->second(std::stoi(chunk.substr(5)));
+        if (!state->first && chunk.starts_with("HOST")) {
+            state->second(chunk.substr(5));
             state->first = true;
         }
     });
-    operatorApi->connection->write("PORT " + std::to_string(id) + '\n' + std::to_string(port));
+    operatorApi->connection->write("HOST " + std::to_string(id));
+    std::cerr << "getHost " << "HOST " + std::to_string(id) << std::endl;
 }
 
 void OperatorApi::create(const std::string& path, const std::string& initToken, const std::function<void(std::shared_ptr<OperatorApi>)> callback) {
@@ -112,18 +115,19 @@ void OperatorApi::create(const std::string& path, const std::string& initToken, 
     auto connection = client.connect(path.c_str());
     connection->onConnected([&connection, &callback, initToken] {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        std::cerr << initToken << '\n';
         connection->write(initToken);
-        callback(std::shared_ptr<OperatorApi>(new OperatorApi(connection)));
+        auto operatorApi = std::shared_ptr<OperatorApi>(new OperatorApi(connection));
+        operatorApi->init();
+        callback(operatorApi);
     });
     client.run();
 }
 
-std::function<OperatorApi::ContainerTemplate*()> OperatorApi::build(const std::string& context, const std::string& dockerfilePath) {
+std::function<OperatorApi::ContainerTemplate*(std::shared_ptr<OperatorApi>)> OperatorApi::build(const std::string& context, const std::string& dockerfilePath) {
     int image = imagesCount++;
     connection->write("BUILD " + std::to_string(image) + '\n' + context + '\n' + dockerfilePath);
-    return [image, self = shared_from_this()] {
-        return new ContainerTemplate(image, self);
+    return [image](std::shared_ptr<OperatorApi> operatorApi) {
+        return new ContainerTemplate(image, operatorApi);
     };
 }
 

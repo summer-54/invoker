@@ -36,7 +36,7 @@ public:
 
     void write(int id, const std::string& chunk);
 
-    void port(int id, int port);
+    void getHost(int id);
 
     void verdict(int id, const std::string& sub, const std::string& data);
 };

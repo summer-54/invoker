@@ -168,6 +168,23 @@ std::string PodmanClient::create(const std::string& image, const std::vector<std
     return container_id;
 }
 
+std::string PodmanClient::getName(const std::string& id) const {
+    auto res = pimpl_->cli_.Get(("/containers/" + id + "/json").c_str());
+    if (!res || res->status != 200) {
+        throw std::runtime_error("Failed to get container info for ID: " + id);
+    }
+    auto json_res = nlohmann::json::parse(res->body);
+    std::string name = json_res["Name"];
+    if (name.empty()) {
+        throw std::runtime_error("Container name not found for ID: " + id);
+    }
+    // Remove leading slash from name if present
+    if (!name.empty() && name[0] == '/') {
+        name = name.substr(1);
+    }
+    return name;
+}
+
 std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd,
                                         const std::map<std::string, std::string>& ports,
                                         const std::map<std::string, std::string>& env,
@@ -189,10 +206,6 @@ void PodmanClient::start(const std::string& container_id, const std::string& ini
     }
     std::cout << "Container started: " << container_id << std::endl;
 }
-
-// std::string PodmanClient::run(const std::string& image, const std::vector<std::string>& cmd) {
-//     return create(image, cmd, {}, {}, {}, "");
-// }
 
 void PodmanClient::stop(const std::string& container_id) const {
     auto res = pimpl_->cli_.Post("/containers/" + container_id + "/stop");

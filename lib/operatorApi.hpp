@@ -21,6 +21,8 @@ protected:
 
     explicit OperatorApi(Socket::Connection* connection);
 
+    void init();
+
     static std::string stringValue(STDOUT value);
     static std::string stringValue(Verdict value);
 
@@ -78,13 +80,13 @@ protected:
             write(stream.str());
         }
 
-        void getPort(int port, const std::function<void(int)>& callback) const;
+        void getHost(const std::function<void(const std::string&)>& callback) const;
     };
 
 public:
     static void create(const std::string& path, const std::string& initToken, std::function<void(std::shared_ptr<OperatorApi>)> callback);
 
-    std::function<ContainerTemplate*()> build(const std::string& context, const std::string& dockerfilePath);
+    std::function<ContainerTemplate*(std::shared_ptr<OperatorApi>)> build(const std::string& context, const std::string& dockerfilePath); // Modified signature
 
     void setVerdict(const std::string& subtaskId, Verdict verdict, const std::string& data = "") const;
     void setVerdict(Verdict verdict, const std::string& data = "") const;

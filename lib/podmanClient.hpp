@@ -28,6 +28,8 @@ public:
                     const std::vector<std::string>& networks,
                     const std::string& initStdin) const;
 
+    std::string getName(const std::string& id) const;
+
     void start(const std::string& container_id, const std::string& initStdin) const;
     void stop(const std::string& container_id) const;
     void restart(const std::string& container_id) const;

@@ -50,7 +50,7 @@ Task::Task(const std::string& id, const std::string& tarBinaryData): id(id) {
     }
     for (const auto& network : networks) podmanClient.createNetwork(network);
     operatorContainer = podmanClient.run(imageTag, {}, {}, {{"INIT_TOKEN", initToken},
-        {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, networks, "");
+                                             {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, networks, "");
 }
 
 Task::~Task() = default;
