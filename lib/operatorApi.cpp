@@ -12,7 +12,6 @@ OperatorApi::OperatorApi(Socket::Connection* connection): connection(connection)
 void OperatorApi::init() {
     connection->onData([self = shared_from_this()](const char* chunk, int length) {
         std::string data(chunk, length);
-        std::cout << "Received: " << data << std::endl;
         for (const auto& callback : self->callbacks) {
             callback(data);
         }
@@ -107,7 +106,6 @@ void OperatorApi::Container::getHost(const std::function<void(const std::string&
         }
     });
     operatorApi->connection->write("HOST " + std::to_string(id));
-    std::cerr << "getHost " << "HOST " + std::to_string(id) << std::endl;
 }
 
 void OperatorApi::create(const std::string& path, const std::string& initToken, const std::function<void(std::shared_ptr<OperatorApi>)> callback) {

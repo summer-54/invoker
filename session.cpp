@@ -144,9 +144,9 @@ void Session::run(int id, int image, const std::string& stdout, const std::strin
     auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, networks, initStdin);
     containers[id] = containerId;
     revContainers[containerId] = id;
-    if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
-    if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
-    if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
+    // if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
+    // if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
+    // if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
 }
 
 void Session::restart(int id) {
