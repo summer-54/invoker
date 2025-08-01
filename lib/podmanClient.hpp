@@ -1,6 +1,8 @@
 #ifndef PODMAN_CLIENT_HPP
 #define PODMAN_CLIENT_HPP
 
+#define CPPHTTPLIB_USE_UNIX_SOCKET 1
+
 #include <string>
 #include <vector>
 #include <map>

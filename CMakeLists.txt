@@ -40,3 +40,14 @@ target_compile_options(operator PRIVATE
 target_link_options(operator PRIVATE
         -fsanitize=address,undefined,leak
 )
+
+add_executable(test test.cpp)
+target_link_libraries(test PRIVATE nlohmann_json::nlohmann_json httplib::httplib)
+target_compile_options(test PRIVATE
+        -fsanitize=address,undefined,leak
+        -fno-omit-frame-pointer
+        -g
+)
+target_link_options(test PRIVATE
+        -fsanitize=address,undefined,leak
+)

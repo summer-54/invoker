@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include <thread>
 
 namespace {
     long int write_callback(struct archive *a, void *user_data, const void *buffer, size_t length) {
@@ -27,7 +28,21 @@ struct PodmanClient::Impl {
     explicit Impl(const std::string& socket_path) : cli_(socket_path) {}
 };
 
-PodmanClient::PodmanClient(const std::string& socket_path) : pimpl_(std::make_unique<Impl>(socket_path)) {}
+PodmanClient::PodmanClient(const std::string& input_path) {
+    std::string socket_path = input_path;
+    if (socket_path.find("unix:") == 0) {
+        std::string path = socket_path.substr(5); // после "unix:"
+        // Удаляем лишние начальные слеши
+        size_t start = path.find_first_not_of('/');
+        if (start != std::string::npos) {
+            path = "/" + path.substr(start);
+        } else {
+            path = "/";
+        }
+        socket_path = "unix:" + path;
+    }
+    pimpl_ = std::make_unique<Impl>(socket_path);
+}
 PodmanClient::~PodmanClient() = default;
 
 void PodmanClient::buildTar(const std::string& tag, const std::string& binaryTarData, const std::string& dockerfilePath) const {
@@ -242,23 +257,26 @@ void PodmanClient::onStderr(const std::string& container_id, std::function<void(
 }
 
 void PodmanClient::attach(const std::string& container_id) const {
-    httplib::Headers headers;
-    auto res = pimpl_->cli_.Post(
-        "/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1",
-        headers,
-        "",
-        "application/vnd.docker.raw-stream",
-        [this, &container_id](const char *data, size_t data_length) {
-            std::string output(data, data_length);
-            if (pimpl_->onStdoutCallbacks_.contains(container_id)) pimpl_->onStdoutCallbacks_[container_id](output);
-            if (pimpl_->onStderrCallbacks_.contains(container_id)) pimpl_->onStderrCallbacks_[container_id](output);
-            return true;
-        },
-        nullptr
-    );
-    if (!res || res->status != 200) {
-        throw std::runtime_error("Failed to attach to container");
-    }
+    std::thread([this, container_id]() {
+        httplib::Headers headers;
+        auto res = pimpl_->cli_.Post(
+            "/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1",
+            headers,
+            "",
+            "application/vnd.docker.raw-stream",
+            [this, &container_id](const char *data, size_t data_length) {
+                std::string output(data, data_length);
+                std::cerr << output << std::endl;
+                if (pimpl_->onStdoutCallbacks_.contains(container_id)) pimpl_->onStdoutCallbacks_[container_id](output);
+                if (pimpl_->onStderrCallbacks_.contains(container_id)) pimpl_->onStderrCallbacks_[container_id](output);
+                return true;
+            },
+            nullptr
+        );
+        if (!res || res->status != 200) {
+            std::cerr << "Failed to attach to container: " << container_id << std::endl;
+        }
+    }).detach();
 }
 
 void PodmanClient::createNetwork(const std::string& name) const {

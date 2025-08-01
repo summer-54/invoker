@@ -141,12 +141,14 @@ std::function<void(const std::string&)> stdoutCallback(int id, const std::string
 
 void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, std::vector<std::string> networks, const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
     for (auto& network : networks) network = this->networks[network];
-    auto containerId = podmanClient.run(images[image], {}, {}, env, volumes, networks, initStdin);
+    auto containerId = podmanClient.create(images[image], {}, {}, env, volumes, networks);
     containers[id] = containerId;
     revContainers[containerId] = id;
-    // if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
-    // if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
-    // if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
+    if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
+    if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
+    if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    podmanClient.start(containerId, initStdin);
 }
 
 void Session::restart(int id) {
