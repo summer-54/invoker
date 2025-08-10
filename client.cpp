@@ -11,7 +11,7 @@ int main() {
         // template_->ports.push_back(80);
         template_->volumes.emplace_back("test", "/volume");
         template_->networks.emplace_back("test1");
-        // (*template_) << "test";
+        (*template_) << "test";
         auto container = template_->run();
         // (*container) << "test";
         // container->getPort(80, [](int){});

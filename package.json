@@ -2,12 +2,18 @@
   "name": "invoker",
   "private": true,
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/dockerode": "^3.3.42",
+    "@types/tar-stream": "^3.1.4",
+    "@types/ws": "^8.18.1"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "dockerode": "^4.0.7",
+    "tar": "^7.4.3",
+    "tar-stream": "^3.1.7",
     "ws": "^8.18.3"
   }
 }

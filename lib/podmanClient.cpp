@@ -205,13 +205,13 @@ std::string PodmanClient::run(const std::string& image, const std::vector<std::s
                                         const std::map<std::string, std::string>& env,
                                         const std::vector<std::pair<std::string, std::string>>& volumes,
                                         const std::vector<std::string>& networks,
-                                        const std::string& initStdin) const {
+                                        const std::string& initStdin) {
     std::string container_id = create(image, cmd, ports, env, volumes, networks);
     start(container_id, initStdin);
     return container_id;
 }
 
-void PodmanClient::start(const std::string& container_id, const std::string& initStdin) const {
+void PodmanClient::start(const std::string& container_id, const std::string& initStdin) {
     auto res = pimpl_->cli_.Post("/containers/" + container_id + "/start");
     if (!res || res->status != 204) {
         throw std::runtime_error("Failed to start container");
@@ -238,14 +238,15 @@ void PodmanClient::restart(const std::string& container_id) const {
     std::cout << "Container restarted: " << container_id << std::endl;
 }
 
-void PodmanClient::write(const std::string& container_id, const std::string& input) const {
-    auto res = pimpl_->cli_.Post("/containers/" + container_id + "/attach?stdin=1&stream=1",
-                                 input,
-                                 "application/vnd.docker.raw-stream");
-    if (!res || res->status != 200) {
-        throw std::runtime_error("Failed to write to container stdin");
-    }
-    std::cout << "Wrote to container stdin: " << container_id << std::endl;
+void PodmanClient::write(const std::string& container_id, const std::string& input) {
+    // auto res = pimpl_->cli_.Post("/containers/" + container_id + "/attach?stdin=1&stream=1",
+    //                              input,
+    //                              "application/vnd.docker.raw-stream");
+    // if (!res || res->status != 200) {
+    //     throw std::runtime_error("Failed to write to container stdin");
+    // }
+    // std::cout << "Wrote to container stdin: " << container_id << std::endl;
+    processes[container_id]->write(input);
 }
 
 void PodmanClient::onStdout(const std::string& container_id, std::function<void(const std::string&)> callback) const {
@@ -256,27 +257,36 @@ void PodmanClient::onStderr(const std::string& container_id, std::function<void(
     pimpl_->onStderrCallbacks_[container_id] = std::move(callback);
 }
 
-void PodmanClient::attach(const std::string& container_id) const {
-    std::thread([this, container_id]() {
-        httplib::Headers headers;
-        auto res = pimpl_->cli_.Post(
-            "/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1",
-            headers,
-            "",
-            "application/vnd.docker.raw-stream",
-            [this, &container_id](const char *data, size_t data_length) {
-                std::string output(data, data_length);
-                std::cerr << output << std::endl;
-                if (pimpl_->onStdoutCallbacks_.contains(container_id)) pimpl_->onStdoutCallbacks_[container_id](output);
-                if (pimpl_->onStderrCallbacks_.contains(container_id)) pimpl_->onStderrCallbacks_[container_id](output);
-                return true;
-            },
-            nullptr
-        );
-        if (!res || res->status != 200) {
-            std::cerr << "Failed to attach to container: " << container_id << std::endl;
-        }
-    }).detach();
+void PodmanClient::attach(const std::string& container_id) {
+    // std::thread([this, container_id]() {
+    //     httplib::Headers headers;
+    //     auto res = pimpl_->cli_.Post(
+    //         "/containers/" + container_id + "/attach?stdout=1&stderr=1&stream=1",
+    //         headers,
+    //         "",
+    //         "application/vnd.docker.raw-stream",
+    //         [this, &container_id](const char *data, size_t data_length) {
+    //             std::string output(data, data_length);
+    //             std::cerr << output << std::endl;
+    //             if (pimpl_->onStdoutCallbacks_.contains(container_id)) pimpl_->onStdoutCallbacks_[container_id](output);
+    //             if (pimpl_->onStderrCallbacks_.contains(container_id)) pimpl_->onStderrCallbacks_[container_id](output);
+    //             return true;
+    //         },
+    //         nullptr
+    //     );
+    //     if (!res || res->status != 200) {
+    //         std::cerr << "Failed to attach to container: " << container_id << std::endl;
+    //     }
+    // }).detach();
+    std::cerr << "podman attach " + container_id << std::endl;
+    processes[container_id] = new AsyncProcess("podman attach " + container_id);
+    auto containerPtr = std::make_shared<std::string>(container_id);
+    processes[container_id]->onStdout([containerPtr, self = shared_from_this()](const std::string& str) {
+        if (self->pimpl_->onStdoutCallbacks_.contains(*containerPtr)) self->pimpl_->onStdoutCallbacks_[*containerPtr](str);
+    });
+    processes[container_id]->onStderr([containerPtr, self = shared_from_this()](const std::string& str) {
+        if (self->pimpl_->onStderrCallbacks_.contains(*containerPtr)) self->pimpl_->onStderrCallbacks_[*containerPtr](str);
+    });
 }
 
 void PodmanClient::createNetwork(const std::string& name) const {

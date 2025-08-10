@@ -146,11 +146,11 @@ void Session::run(int id, int image, const std::string& stdout, const std::strin
     auto containerId = podmanClient.create(images[image], {}, {}, env, volumes, networks);
     containers[id] = containerId;
     revContainers[containerId] = id;
+    podmanClient.start(containerId, initStdin);
+    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
     // if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
     // if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
     // if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
-    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    podmanClient.start(containerId, initStdin);
 }
 
 void Session::restart(int id) {
