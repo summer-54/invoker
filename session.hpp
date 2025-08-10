@@ -16,18 +16,19 @@ protected:
     std::map<int, std::string> images, containers;
     std::map<std::string, int> revImages, revContainers;
     std::shared_ptr<Socket::Connection*> connection;
+    std::string volumePath;
 
 public:
     std::map<std::string, std::string> networks;
 
-    explicit Session(const std::map<std::string, std::string>& networks, const std::shared_ptr<Socket::Connection*>& connection, int id = sessionsCount++);
+    explicit Session(const std::map<std::string, std::string>& networks, const std::string& volumePath, const std::shared_ptr<Socket::Connection*>& connection, int id = sessionsCount++);
 
     void onData(std::string data);
 
     void build(int image, const std::string& context, const std::string& dockerfilePath);
 
     void run(int id, int image, const std::string& stdout, const std::string& stderr, std::vector<std::string> networks,
-             const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env,
+             std::vector<std::pair<std::string, std::string>> volumes, const std::map<std::string, std::string>& env,
              const std::string& initStdin);
 
     void restart(int id);

@@ -1,5 +1,6 @@
 #include "session.hpp"
 #include <chrono>
+#include <filesystem>
 #include <httplib.h>
 
 #include "lib/podmanClient.hpp"
@@ -37,7 +38,7 @@ int findFreePort(int min, int max = 65535) {
 
 int Session::sessionsCount = 0;
 
-Session::Session(const std::map<std::string, std::string>& networks, const std::shared_ptr<Socket::Connection*>& connection, const int id): id(id), connection(connection), networks(networks) {}
+Session::Session(const std::map<std::string, std::string>& networks, const std::string& volumePath, const std::shared_ptr<Socket::Connection*>& connection, const int id): id(id), connection(connection), volumePath(volumePath), networks(networks) {}
 
 void Session::onData(std::string data) {
     std::cout << "Received: " << data << '\n' << std::endl;
@@ -139,15 +140,16 @@ std::function<void(const std::string&)> stdoutCallback(int id, const std::string
     };
 }
 
-void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, std::vector<std::string> networks, const std::vector<std::pair<std::string, std::string>>& volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
+void Session::run(int id, int image, const std::string& stdout, const std::string& stderr, std::vector<std::string> networks, std::vector<std::pair<std::string, std::string>> volumes, const std::map<std::string, std::string>& env, const std::string& initStdin) {
     for (auto& network : networks) network = this->networks[network];
+    for (auto& path : volumes | std::views::keys) path = (std::filesystem::path(volumePath) / path).string();
     auto containerId = podmanClient.create(images[image], {}, {}, env, volumes, networks);
     containers[id] = containerId;
     revContainers[containerId] = id;
-    if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
-    if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
-    if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // if (stdout != "none") podmanClient.onStdout(containerId, stdoutCallback(id, stdout, connection));
+    // if (stderr != "none") podmanClient.onStderr(containerId, stdoutCallback(id, stderr, connection));
+    // if (stdout != "none" || stderr != "none") podmanClient.attach(containerId);
+    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
     podmanClient.start(containerId, initStdin);
 }
 

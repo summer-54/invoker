@@ -1,6 +1,7 @@
 #include "task.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <random>
 
@@ -8,6 +9,7 @@
 
 const std::string SOCKET_PATH = "/tmp/invoker.sock";
 const std::string SOCKET_INNER_PATH = "/invoker.sock";
+const std::string VOLUMES_ROOT = std::string(std::getenv("HOME")) + "/.invokerVolumes";
 
 std::string randomstring(size_t length) {
     const std::string charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -49,8 +51,11 @@ Task::Task(const std::string& id, const std::string& tarBinaryData): id(id) {
         for (auto& network : networks) network = this->networks[network];
     }
     for (const auto& network : networks) podmanClient.createNetwork(network);
+    volumePath = std::filesystem::path(VOLUMES_ROOT) / imageTag;
+    if (!std::filesystem::exists(VOLUMES_ROOT)) std::filesystem::create_directory(VOLUMES_ROOT);
+    std::filesystem::create_directory(volumePath);
     operatorContainer = podmanClient.run(imageTag, {}, {}, {{"INIT_TOKEN", initToken},
-                                             {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}}, networks, "");
+        {"SOCKET_PATH", SOCKET_INNER_PATH}}, {{SOCKET_PATH, SOCKET_INNER_PATH}, {volumePath, "/volume"}}, networks, "");
 }
 
 Task::~Task() = default;
@@ -61,4 +66,12 @@ void Task::stop() {
 
 std::string Task::getToken() {
     return initToken;
+}
+
+std::map<std::string, std::string> Task::getNetworks() {
+    return networks;
+}
+
+std::string Task::getVolumePath() {
+    return volumePath;
 }

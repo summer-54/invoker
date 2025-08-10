@@ -132,7 +132,7 @@ std::string PodmanClient::create(const std::string& image, const std::vector<std
 
     nlohmann::json exposed_ports = nlohmann::json::object();
     for (const auto& key : ports | std::views::keys) {
-        const std::string container_port = key + "/tcp";
+        const std::string container_port = key.ends_with("/tcp") || key.ends_with("/udp") ? key : key + "/tcp";
         exposed_ports[container_port] = nlohmann::json::object();
     }
     body["ExposedPorts"] = exposed_ports;

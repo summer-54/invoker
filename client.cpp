@@ -9,7 +9,7 @@ int main() {
         auto template_ = image(operatorApi);
         template_->env["TEST"] = "true";
         // template_->ports.push_back(80);
-        // template_->volumes.emplace_back("/home/sizoff/testVolume", "/volume");
+        template_->volumes.emplace_back("test", "/volume");
         template_->networks.emplace_back("test1");
         // (*template_) << "test";
         auto container = template_->run();

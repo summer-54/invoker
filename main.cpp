@@ -46,7 +46,7 @@ int main() {
                 }
                 for (const auto& task : client.tasks_ | std::views::values) {
                     if (task->getToken() == data) {
-                        sessions.push_back(new Session(task->networks, connPtr));
+                        sessions.push_back(new Session(task->getNetworks(), task->getVolumePath(), connPtr));
                         task->session = std::make_shared<Session*>(sessions.back());
                         (*connPtr)->data = sessions.back();
                     }
