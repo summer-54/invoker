@@ -2,7 +2,6 @@
 ## Incoming
 ### Start task
 ```
-<task id>
 START
 <binary data>
 ```
@@ -14,6 +13,7 @@ STOP
 ### Full task verdict
 ```
 VERDICT <verdict>
+<data>
 ```
 ### Test verdict
 ```
@@ -23,17 +23,17 @@ VERDICT <verdict>
 ```
 ### Exited
 ```
-EXITED <verdict>
+EXITED <exit code>
+<exit data>
 ```
 ### Invoker error
 ```
-<task id>
 ERROR
 <error message>
+
 ```
 ### Operator error
 ```
-<task id>
 OPERROR
 <error message>
 ```

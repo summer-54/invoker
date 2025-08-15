@@ -1,0 +1,25 @@
+[package]
+name = "invoker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = { version = "*" }
+
+reqwest = { version = "*", features = ["json"] }
+log = { version = "*" }
+env_logger = { version = "*" }
+
+tokio = { version = "*", features = ["full"] }
+tokio-websockets = { version = "*", features = [
+    "client",
+    "openssl",
+    "fastrand",
+] }
+futures = { version = "*" }
+
+http = { version = "*" }
+anyhow = { version = "*" }
+
+serde = { version = "*", features = ["derive"] }
+serde_yml = { version = "*" }
