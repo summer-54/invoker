@@ -9,6 +9,10 @@ START
 ```
 STOP
 ```
+### Stop task
+```
+CLOSE
+```
 ## Outgoing
 ### Full task verdict
 ```

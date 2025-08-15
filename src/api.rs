@@ -11,6 +11,7 @@ pub mod income {
     pub enum Msg {
         Start { data: Box<[u8]> },
         Stop,
+        Close,
     }
 }
 

@@ -12,8 +12,8 @@ pub use anyhow::Result;
 pub use env_logger;
 
 struct App {
-    ws: ws::Service,
-    isolate: Arc<sandboxes::isolate::Service>,
+    pub ws: ws::Service,
+    pub isolate: Arc<sandboxes::isolate::Service>,
 }
 
 impl App {
@@ -23,11 +23,13 @@ impl App {
                 let msg = self.ws.recv().await?;
                 match msg {
                     api::income::Msg::Start { data } => {
-                        judge::judge(Arc::clone(&self), todo!("path to packeage with task"))?
+                        judge::judge(Arc::clone(&self), todo!("path to packeage with task")).await?
                     }
                     api::income::Msg::Stop => judge::stop_all(Arc::clone(&self))?,
+                    api::income::Msg::Close => break,
                 }
             }
+            log::info!("invoker was closed ws message");
             Result::<()>::Ok(())
         });
 

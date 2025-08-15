@@ -79,6 +79,7 @@ impl Service {
                     data: Box::from(data),
                 },
                 "STOP" => income::Msg::Stop,
+                "CLOSE" => income::Msg::Close,
                 command => {
                     log::error!("incorrect command in incomming websocket message: {command}");
                     continue;
