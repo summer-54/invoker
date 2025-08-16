@@ -35,18 +35,14 @@ impl Service {
             .lock()
             .await
             .send(Message::text(match msg {
-                outgo::Msg::FullTaskVerdict { verdict, data } => {
-                    format!("VERDICT {}\n{}\n", verdict.to_string(), data)
+                outgo::Msg::FullVerdict { score, data } => {
+                    format!("VERDICT {}\n{}\n", score, data)
                 }
-                outgo::Msg::SubTaskVerdict {
-                    subtask_id,
+                outgo::Msg::TestVerdict {
+                    test_id,
                     verdict,
                     data,
-                } => format!(
-                    "SUBTASK {subtask_id}\nVERDICT {}\n{}\n",
-                    verdict.to_string(),
-                    data
-                ),
+                } => format!("TEST {test_id}\nVERDICT {}\n{}\n", verdict, data),
                 outgo::Msg::Exited { code, data } => {
                     format!("EXITED {code}\n{}\n", data)
                 }

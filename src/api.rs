@@ -1,11 +1,3 @@
-#[derive(Debug)]
-pub enum Verdict {}
-impl ToString for Verdict {
-    fn to_string(&self) -> String {
-        todo!()
-    }
-}
-
 pub mod income {
     #[derive(Debug)]
     pub enum Msg {
@@ -16,16 +8,15 @@ pub mod income {
 }
 
 pub mod outgo {
-    use super::Verdict;
-
+    use crate::judge::Verdict;
     #[derive(Debug)]
     pub enum Msg {
-        FullTaskVerdict {
-            verdict: Verdict,
+        FullVerdict {
+            score: usize,
             data: Box<str>,
         },
-        SubTaskVerdict {
-            subtask_id: usize,
+        TestVerdict {
+            test_id: usize,
             verdict: Verdict,
             data: Box<str>,
         },

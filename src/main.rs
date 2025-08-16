@@ -6,14 +6,21 @@ mod ws;
 
 use std::{str::FromStr, sync::Arc};
 
+use futures::StreamExt;
+use tokio::{
+    io::AsyncRead,
+    sync::{Mutex, mpsc::unbounded_channel},
+};
 use ws::Uri;
 
 pub use anyhow::Result;
 pub use env_logger;
 
+use tokio_tar::Archive;
+
 struct App {
     pub ws: ws::Service,
-    pub isolate: Arc<sandboxes::isolate::Service>,
+    pub judger: judge::Service,
 }
 
 impl App {
@@ -23,9 +30,26 @@ impl App {
                 let msg = self.ws.recv().await?;
                 match msg {
                     api::income::Msg::Start { data } => {
-                        judge::judge(Arc::clone(&self), todo!("path to packeage with task")).await?
+                        let package = Archive::new(&*data);
+                        let (sender, mut receiver) = unbounded_channel::<judge::TestResult>();
+                        let self_clone = Arc::clone(&self);
+                        let handler = tokio::spawn(async move {
+                            while let Some(test_result) = receiver.recv().await {
+                                self_clone
+                                    .ws
+                                    .send(api::outgo::Msg::TestVerdict {
+                                        test_id: test_result.id,
+                                        verdict: test_result.verdict,
+                                        data: "".to_string().into_boxed_str(), // TODO: data
+                                    })
+                                    .await
+                                    .expect("webscoket not working unexpectually");
+                            }
+                        });
+                        let result = self.judger.judge(package, sender).await;
+                        handler.await?;
                     }
-                    api::income::Msg::Stop => judge::stop_all(Arc::clone(&self))?,
+                    api::income::Msg::Stop => self.judger.stop_all().await?,
                     api::income::Msg::Close => break,
                 }
             }
@@ -56,7 +80,7 @@ async fn main() -> Result<()> {
 
     let app = App {
         ws: ws_client,
-        isolate: isolate_client,
+        judger: judge::Service::new(isolate_client),
     };
 
     Arc::new(app).run().await?;

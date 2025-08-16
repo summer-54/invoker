@@ -9,21 +9,26 @@ START
 ```
 STOP
 ```
-### Stop task
+### Close invoker
 ```
 CLOSE
 ```
 ## Outgoing
-### Full task verdict
+### Full verdict
 ```
-VERDICT <verdict>
-<data>
+VERDICT <score>
+GROUPS
+0
+20
+70
 ```
 ### Test verdict
 ```
-SUBTASK <subtask id>
+TEST <id>
 VERDICT <verdict>
-<data>
+TIME 12
+MEMORY 1123
+<data: tar: (output, checker_output)>
 ```
 ### Exited
 ```
@@ -34,10 +39,20 @@ EXITED <exit code>
 ```
 ERROR
 <error message>
-
 ```
 ### Operator error
 ```
 OPERROR
 <error message>
 ```
+### Sending token
+```
+TOKEN <token: uuid>
+```
+
+## Verdicts:
+ - WA: wrong answer
+ - CE: compile error
+ - RE: runtime error
+ - SK: skipped
+ - OK: ok

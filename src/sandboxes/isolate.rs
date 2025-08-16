@@ -182,6 +182,15 @@ impl Service {
             ))
         }
     }
+
+    pub async fn clean(self: Arc<Self>) {
+        log::info!("isolate cleannig...");
+        let output = Command::new(&*self.path)
+            .arg("--cleanup")
+            .status()
+            .await
+            .unwrap();
+    }
 }
 
 pub struct RunConfig {
