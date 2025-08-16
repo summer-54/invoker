@@ -45,7 +45,7 @@ impl App {
                                         verdict: test_result.verdict,
                                         time: test_result.time,
                                         memory: test_result.memory,
-                                        data, // TODO: data
+                                        data,
                                     })
                                     .await
                                     .expect("webscoket isn't working unexpexted");

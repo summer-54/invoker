@@ -19,13 +19,26 @@ pub async fn compress<R: AsyncBufRead + Unpin>(items: &[(&str, &[u8])]) -> Resul
     for (path, item) in Box::<[(&str, &[u8])]>::from(items) {
         let mut header = Header::new_gnu();
         header.set_size(item.len() as u64);
+        header.set_mode(777);
         header.set_cksum();
 
-        archive_builder.append_data(&mut header, path, item);
+        archive_builder.append_data(&mut header, path, item).await?;
     }
 
     let mut archive = archive_builder.into_inner().await?;
     archive.shutdown().await?;
 
     Ok(archive.into_inner().into_boxed_slice())
+}
+
+#[tokio::test]
+async fn archivate() {
+    let mut f = tokio::fs::File::create("test1.tar.gz").await.unwrap();
+    f.write_all(
+        &*compress::<&[u8]>(&*vec![("a.txt", "aboba".as_bytes())])
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
 }
