@@ -25,3 +25,4 @@ serde = { version = "*", features = ["derive"] }
 serde_yml = { version = "*" }
 
 tokio-tar = { version = "*" }
+async-compression = { version = "*", features = ["all"] }

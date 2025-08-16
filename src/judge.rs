@@ -1,11 +1,14 @@
-use serde::{Deserialize, Serialize};
-use tokio::{
-    sync::{Mutex, Semaphore, mpsc::UnboundedSender},
-    task::JoinHandle,
+use {
+    serde::{Deserialize, Serialize},
+    tokio::{
+        sync::{Mutex, Semaphore, mpsc::UnboundedSender},
+        task::JoinHandle,
+    },
 };
 
-use crate::{App, Result, pull::Pull, sandboxes::isolate};
 use std::{io::Read, sync::Arc};
+
+use crate::{App, Result, pull::Pull, sandboxes::isolate};
 
 #[derive(Deserialize)]
 enum ProblemType {
@@ -27,11 +30,17 @@ struct ProblemConfig {
     // TODO: groups
 }
 
+pub struct FullResult {
+    pub score: usize,
+    pub groups_score: Box<[usize]>,
+}
+
 pub struct TestResult {
     pub id: usize,
     pub verdict: Verdict,
     pub time: f64,
     pub memory: usize,
+
     pub output: Arc<str>,
     pub checker_output: Arc<str>,
 }
@@ -82,16 +91,16 @@ impl Service {
         }
     }
 
-    pub async fn judge<R: Read + Unpin + tokio::io::AsyncRead>(
+    pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
         &self,
         package: tokio_tar::Archive<R>,
         sender: UnboundedSender<TestResult>,
-    ) -> Result<()> {
-        self.semaphore.try_acquire()?;
+    ) -> Result<FullResult> {
+        let permit = self.semaphore.try_acquire()?;
 
         tokio::spawn(async move { todo!("problem testing") });
 
-        Ok(())
+        todo!("run result")
     }
 
     pub async fn stop_all(&self) -> Result<()> {

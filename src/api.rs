@@ -13,12 +13,14 @@ pub mod outgo {
     pub enum Msg {
         FullVerdict {
             score: usize,
-            data: Box<str>,
+            groups_score: Box<[usize]>,
         },
         TestVerdict {
             test_id: usize,
             verdict: Verdict,
-            data: Box<str>,
+            time: f64,
+            memory: usize,
+            data: Box<[u8]>,
         },
         Exited {
             code: u8,

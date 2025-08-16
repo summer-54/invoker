@@ -1,20 +1,18 @@
-use anyhow::anyhow;
-use tokio::sync::Mutex;
-
 use crate::{
-    Result,
+    Result, anyhow,
     api::{income, outgo},
 };
-
-use tokio::net::TcpStream;
-
-use futures::{
-    SinkExt, StreamExt,
-    stream::{SplitSink, SplitStream},
-};
-use tokio_websockets::{ClientBuilder, MaybeTlsStream, Message, WebSocketStream};
-
 pub use http::Uri;
+
+use {
+    futures::{
+        SinkExt, StreamExt,
+        stream::{SplitSink, SplitStream},
+    },
+    tokio::{net::TcpStream, sync::Mutex},
+    tokio_websockets::{ClientBuilder, MaybeTlsStream, Message, WebSocketStream},
+};
+
 pub struct Service {
     read: Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
     write: Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
@@ -34,20 +32,36 @@ impl Service {
         self.write
             .lock()
             .await
-            .send(Message::text(match msg {
-                outgo::Msg::FullVerdict { score, data } => {
-                    format!("VERDICT {}\n{}\n", score, data)
+            .send(Message::binary(match msg {
+                outgo::Msg::FullVerdict {
+                    score,
+                    groups_score,
+                } => {
+                    let mut ws_msg = format!("VERDICT {}\n GROUPS\n", score);
+                    for score in groups_score {
+                        ws_msg.push_str(&format!("{score}\n"));
+                    }
+                    ws_msg.into_bytes()
                 }
                 outgo::Msg::TestVerdict {
                     test_id,
                     verdict,
+                    time,
+                    memory,
                     data,
-                } => format!("TEST {test_id}\nVERDICT {}\n{}\n", verdict, data),
-                outgo::Msg::Exited { code, data } => {
-                    format!("EXITED {code}\n{}\n", data)
+                } => {
+                    let mut bin_msg = format!(
+                        "TEST {test_id}\nVERDICT {verdict}\nTIME {time}\nMEMORY {memory}\n"
+                    )
+                    .into_bytes();
+                    bin_msg.append(&mut data.into_vec());
+                    bin_msg
                 }
-                outgo::Msg::Error { msg } => format!("ERROR\n{msg}\n"),
-                outgo::Msg::OpError { msg } => format!("OPERROR\n{msg}\n"),
+                outgo::Msg::Exited { code, data } => {
+                    format!("EXITED {code}\n{}\n", data).into_bytes()
+                }
+                outgo::Msg::Error { msg } => format!("ERROR\n{msg}\n").into_bytes(),
+                outgo::Msg::OpError { msg } => format!("OPERROR\n{msg}\n").into_bytes(),
             }))
             .await?;
         Ok(())

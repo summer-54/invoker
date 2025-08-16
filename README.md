@@ -17,17 +17,18 @@ CLOSE
 ### Full verdict
 ```
 VERDICT <score>
-GROUPS
-0
-20
-70
+<score group 1>
+<score group 2>
+<score group 3>
+...
+<score group n>
 ```
 ### Test verdict
 ```
 TEST <id>
 VERDICT <verdict>
-TIME 12
-MEMORY 1123
+TIME <time>
+MEMORY <memory>
 <data: tar: (output, checker_output)>
 ```
 ### Exited
