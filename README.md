@@ -52,8 +52,11 @@ TOKEN <token: uuid>
 ```
 
 ## Verdicts:
- - WA: wrong answer
- - CE: compile error
- - RE: runtime error
- - SK: skipped
- - OK: ok
+ - OK  //ok
+ - WA, //wrong answer
+ - ML, //memory limit
+ - TL, //time limit
+ - RE, //runtime error
+ - CE, //compile error
+ - TE, //testing system error
+ - SL, //stack limit

@@ -5,6 +5,8 @@ mod pull;
 mod sandboxes;
 mod ws;
 
+use tokio::io::{AsyncReadExt, stdin};
+
 pub use {
     anyhow::{Result, anyhow},
     env_logger,
@@ -29,7 +31,7 @@ impl App {
                         let (sender, mut receiver) = unbounded_channel::<judge::TestResult>();
                         let handler = tokio::spawn(async move {
                             while let Some(test_result) = receiver.recv().await {
-                                let data = archive::compress::<&[u8]>(&[
+                                let data = archive::compress(&[
                                     ("output", test_result.output.as_bytes()),
                                     ("checker_output", test_result.checker_output.as_bytes()),
                                 ])
@@ -102,14 +104,22 @@ async fn main() -> Result<()> {
     let config_dir = std::env::var("INVOKER_CONFIG_DIR")
         .expect("enviroment variable 'INVOKER_CONFIG_DIR' not found");
 
-    log::info!("{} ", task_manager_uri);
+    let work_dir = std::env::var("INVOKER_WORK_DIR")
+        .expect("enviroment variable 'INVOKER_WORK_DIR' not found");
+
+    log::info!("task manager uri: {task_manager_uri}");
+    log::info!("invoker work dir: {work_dir}");
+    log::warn!("{work_dir} can be cleared. Press any key to continue ...");
+
+    let mut _buf = vec![];
+    stdin().read_buf(&mut _buf);
 
     let ws_client = ws::Service::from_uri(task_manager_uri).await?;
     let isolate_client = sandboxes::isolate::Service::new(&config_dir).await?;
 
     let app = App {
         ws: ws_client,
-        judger: judge::Service::new(isolate_client),
+        judger: judge::Service::new(isolate_client, Box::from(work_dir)),
     };
 
     Arc::new(app).run().await?;

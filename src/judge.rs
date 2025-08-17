@@ -1,6 +1,9 @@
+use tokio::io::AsyncReadExt;
+
 use {
     serde::{Deserialize, Serialize},
     tokio::{
+        fs::{File, remove_dir},
         sync::{Mutex, Semaphore, mpsc::UnboundedSender},
         task::JoinHandle,
     },
@@ -8,14 +11,14 @@ use {
 
 use std::{io::Read, sync::Arc};
 
-use crate::{App, Result, pull::Pull, sandboxes::isolate};
+use crate::{Result, archive, sandboxes::isolate};
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 enum ProblemType {
     Standart,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ProblemLimits {
     time: f64,
     real_time: f64,
@@ -24,10 +27,22 @@ struct ProblemLimits {
     stack: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct TestsRange(usize, usize);
+
+#[derive(Debug, Deserialize)]
+struct Group {
+    id: usize,
+    range: TestsRange,
+    cost: usize,
+    dependency: Box<[usize]>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ProblemConfig {
     r#type: ProblemType,
     limits: ProblemLimits,
-    // TODO: groups
+    groups: Box<[Group]>,
 }
 
 pub struct FullResult {
@@ -77,14 +92,17 @@ impl std::fmt::Display for Verdict {
 }
 
 pub struct Service {
+    work_dir: Box<str>,
+
     semaphore: Semaphore,
     isolate: Arc<isolate::Service>,
     handler: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Service {
-    pub fn new(isolate: Arc<isolate::Service>) -> Service {
+    pub fn new(isolate: Arc<isolate::Service>, work_dir: Box<str>) -> Service {
         Service {
+            work_dir,
             isolate,
             handler: Mutex::new(None),
             semaphore: Semaphore::new(1),
@@ -93,13 +111,21 @@ impl Service {
 
     pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
         &self,
-        package: tokio_tar::Archive<R>,
+        mut package: tokio_tar::Archive<R>,
         sender: UnboundedSender<TestResult>,
     ) -> Result<FullResult> {
         let permit = self.semaphore.try_acquire()?;
+        package.unpack(&*self.work_dir).await?;
 
-        tokio::spawn(async move { todo!("problem testing") });
+        let mut text = String::new();
+        File::open(&format!("{}/config.yaml", &self.work_dir))
+            .await?
+            .read_to_string(&mut text)
+            .await?;
+        let problem_config: ProblemConfig = serde_yml::from_str(text.as_str())?;
 
+        remove_dir(&*self.work_dir).await?;
+        drop(permit);
         todo!("run result")
     }
 

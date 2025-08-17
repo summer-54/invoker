@@ -11,18 +11,18 @@ tests:
   count: 30
   groups:
     - id: 0
-      range: 1..2
+      range: [1, 2]
       cost: 0
       dependends: []
     - id: 1
-      range: 3..10
+      range: [3, 10]
       cost: 30
       dependends: []
     - id: 2
-      range: 11..20
+      range: [11, 20]
       cost: 20
       depends: [1]
     - id: 3
-      range: 21..30
+      range: [21, 30]
       cost: 50
       depends: [1, 2]
