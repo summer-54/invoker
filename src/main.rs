@@ -8,7 +8,7 @@ mod ws;
 use tokio::io::{AsyncReadExt, stdin};
 
 pub use {
-    anyhow::{Result, anyhow},
+    anyhow::{Error, Result, anyhow},
     env_logger,
 };
 

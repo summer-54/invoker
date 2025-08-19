@@ -14,6 +14,7 @@ use std::{io::Read, sync::Arc};
 use crate::{Result, archive, sandboxes::isolate};
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum ProblemType {
     Standart,
 }
@@ -35,14 +36,20 @@ struct Group {
     id: usize,
     range: TestsRange,
     cost: usize,
-    dependency: Box<[usize]>,
+    depends: Box<[usize]>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TestsConfig {
+    count: usize,
+    groups: Box<[Group]>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProblemConfig {
     r#type: ProblemType,
     limits: ProblemLimits,
-    groups: Box<[Group]>,
+    tests: TestsConfig,
 }
 
 pub struct FullResult {
@@ -62,14 +69,14 @@ pub struct TestResult {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Verdict {
-    OK, //ok
-    WA, //wrong answer
-    ML, //memory limit
-    TL, //time limit
-    RE, //runtime error
-    CE, //compile error
-    TE, //testing system error
-    SL, //stack limit
+    Ok, //ok
+    Wa, //wrong answer
+    Ml, //memory limit
+    Tl, //time limit
+    Re, //runtime error
+    Ce, //compile error
+    Te, //testing system error
+    Sl, //stack limit
 }
 
 impl std::fmt::Display for Verdict {
@@ -78,14 +85,14 @@ impl std::fmt::Display for Verdict {
             f,
             "{}",
             match self {
-                Verdict::OK => "OK",
-                Verdict::WA => "WA",
-                Verdict::ML => "ML",
-                Verdict::TL => "TL",
-                Verdict::RE => "RE",
-                Verdict::CE => "CE",
-                Verdict::TE => "TE",
-                Verdict::SL => "SL",
+                Verdict::Ok => "OK",
+                Verdict::Wa => "WA",
+                Verdict::Ml => "ML",
+                Verdict::Tl => "TL",
+                Verdict::Re => "RE",
+                Verdict::Ce => "CE",
+                Verdict::Te => "TE",
+                Verdict::Sl => "SL",
             }
         )
     }
@@ -124,6 +131,18 @@ impl Service {
             .await?;
         let problem_config: ProblemConfig = serde_yml::from_str(text.as_str())?;
 
+        match problem_config.r#type {
+            ProblemType::Standart => {
+                let sandbox = Arc::clone(&self.isolate).init_box().await?;
+
+                // sandbox.run(target_command, input_path, output_path, cfg);
+
+                let test_counts = problem_config.tests.count;
+
+                for test_number in 1..=test_counts {}
+            }
+        };
+
         remove_dir(&*self.work_dir).await?;
         drop(permit);
         todo!("run result")
@@ -138,4 +157,18 @@ impl Service {
         Arc::clone(&self.isolate).clean().await;
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn parsing() {
+    let mut text = String::new();
+    File::open(&format!("templates/problem_template/config.yaml"))
+        .await
+        .unwrap()
+        .read_to_string(&mut text)
+        .await
+        .unwrap();
+    let problem_config: ProblemConfig = serde_yml::from_str(text.as_str()).unwrap();
+
+    dbg!("{:#?}", problem_config);
 }

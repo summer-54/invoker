@@ -13,11 +13,11 @@ tests:
     - id: 0
       range: [1, 2]
       cost: 0
-      dependends: []
+      depends: []
     - id: 1
       range: [3, 10]
       cost: 30
-      dependends: []
+      depends: []
     - id: 2
       range: [11, 20]
       cost: 20

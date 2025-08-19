@@ -1,6 +1,7 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{ErrorKind, Read},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -16,7 +17,7 @@ use {
     },
 };
 
-use crate::{Result, anyhow, pull::Pull};
+use crate::{Error, Result, anyhow, pull::Pull};
 
 use {
     serde::{Deserialize, Serialize},
@@ -33,6 +34,7 @@ enum MaybeLimited<T: Copy> {
     Unlimited,
 }
 use MaybeLimited::{Limited, Unlimited};
+use tokio_websockets::Message;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IsolateConfig {
@@ -209,7 +211,30 @@ pub struct RunConfig {
     proccess_limit: Option<MaybeLimited<usize>>,
 }
 
-pub struct RunResult {}
+#[derive(Debug, PartialEq, Eq)]
+pub enum RunStatus {
+    Ok,
+    Tl,
+    Ml,
+    Re(u8),
+    Sg(u8),
+    Te,
+}
+
+impl RunStatus {
+    fn is_success(&self) -> bool {
+        *self == Self::Ok
+    }
+}
+
+pub struct RunResult {
+    status: RunStatus,
+    time: f64,
+    real_time: f64,
+    status_message: Option<Box<str>>,
+    memory: usize,
+    killed: bool,
+}
 
 pub struct Sandbox {
     service: Arc<Service>,
@@ -229,20 +254,24 @@ impl Drop for Sandbox {
 
 impl Sandbox {
     fn inner_dir(&self) -> Box<str> {
-        format!("{}/{}", self.service.config.lock_root, self.id).into_boxed_str()
+        format!("{}/{}/box", self.service.config.lock_root, self.id).into_boxed_str()
     }
 
     pub async fn run(
         &self,
-        target_command: Command,
+        target_command: Box<str>,
         input_path: Option<&str>,
         output_path: Option<&str>,
         cfg: RunConfig,
     ) -> Result<RunResult> {
-        todo!("copy input file into box");
+        let meta_path = format!("{}/meta", self.inner_dir());
 
         let mut command = Command::new(&*self.service.path);
-        command.arg("--run").arg(format!("--box-id={}", self.id));
+        command
+            .arg("--run")
+            .arg(format!("\"{target_command}\""))
+            .arg(format!("--box-id={}", self.id))
+            .arg(format!("--meta={meta_path}"));
         if let Limited(time_limit) = cfg.time_limit {
             command.arg(format!("--time={}", time_limit));
         }
@@ -275,9 +304,40 @@ impl Sandbox {
             command.arg(format!("--proccess_limit={}", proccess_limit));
         }
 
+        log::info!(
+            "'{command:?}' executing in isolate/sanbox <id: {}>",
+            self.id
+        );
+
         let status = command.status();
 
-        Ok(RunResult {})
+        let meta = tokio::fs::read_to_string(meta_path)
+            .await?
+            .split("\n")
+            .map(|s| {
+                s.split_once(':')
+                    .map(|(k, v)| (Box::from(k.trim()), Box::from(v.trim())))
+            })
+            .collect::<Option<HashMap<Box<str>, Box<str>>>>()
+            .ok_or(anyhow!("incorrect meta file (so strange)"))?;
+
+        Ok(RunResult {
+            status: if let Some(status) = meta.get("status") {
+                match &**status {
+                    "RE" => RunStatus::Re(meta["exitcode"].parse()?),
+                    "SG" => RunStatus::Sg(meta["exitsig"].parse()?),
+                    "TO" => RunStatus::Tl,
+                    _ => return Err(anyhow!("incorrect WebSocker")),
+                }
+            } else {
+                RunStatus::Ok
+            },
+            time: meta["time"].parse()?,
+            real_time: meta["time"].parse()?,
+            status_message: meta.get("message").cloned(),
+            memory: todo!(),
+            killed: todo!(),
+        })
     }
 
     pub async fn write_box<R: AsyncRead + Unpin + ?Sized>(
