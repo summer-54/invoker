@@ -9,12 +9,20 @@ pub mod income {
 
 pub mod outgo {
     use crate::judge::Verdict;
+
     #[derive(Debug)]
-    pub enum Msg {
-        FullVerdict {
+    pub enum FullVerdict {
+        Ok {
             score: usize,
             groups_score: Box<[usize]>,
         },
+        Ce(Box<str>),
+        Te(Box<str>),
+    }
+
+    #[derive(Debug)]
+    pub enum Msg {
+        FullVerdict(FullVerdict),
         TestVerdict {
             test_id: usize,
             verdict: Verdict,

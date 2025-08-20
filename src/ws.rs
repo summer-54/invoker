@@ -33,16 +33,25 @@ impl Service {
             .lock()
             .await
             .send(Message::binary(match msg {
-                outgo::Msg::FullVerdict {
-                    score,
-                    groups_score,
-                } => {
-                    let mut ws_msg = format!("VERDICT {}\n GROUPS\n", score);
-                    for score in groups_score {
-                        ws_msg.push_str(&format!("{score}\n"));
+                outgo::Msg::FullVerdict(verdict) => match verdict {
+                    outgo::FullVerdict::Ok {
+                        score,
+                        groups_score,
+                    } => {
+                        let mut ws_msg = format!("VERDICT OK\nSUM {score}\n GROUPS\n");
+                        for score in groups_score {
+                            ws_msg.push_str(&format!("{score}\n"));
+                        }
+                        ws_msg
                     }
-                    ws_msg.into_bytes()
+                    outgo::FullVerdict::Ce(msg) => {
+                        format!("VERDICT CE\n {msg}")
+                    }
+                    outgo::FullVerdict::Te(msg) => {
+                        format!("VERDICT CE\n {msg}")
+                    }
                 }
+                .into_bytes(),
                 outgo::Msg::TestVerdict {
                     test_id,
                     verdict,

@@ -7,6 +7,8 @@ mod ws;
 
 use tokio::io::{AsyncReadExt, stdin};
 
+use crate::api::outgo::{self, FullVerdict};
+
 pub use {
     anyhow::{Error, Result, anyhow},
     env_logger,
@@ -17,7 +19,7 @@ use {tokio::sync::mpsc::unbounded_channel, tokio_tar::Archive, ws::Uri};
 
 struct App {
     pub ws: ws::Service,
-    pub judger: judge::Service,
+    pub judger: Arc<judge::Service>,
 }
 
 impl App {
@@ -28,9 +30,10 @@ impl App {
                 match msg {
                     api::income::Msg::Start { data } => {
                         let self_clone = Arc::clone(&self);
-                        let (sender, mut receiver) = unbounded_channel::<judge::TestResult>();
+                        let (sender, mut receiver) =
+                            unbounded_channel::<(usize, judge::TestResult)>();
                         let handler = tokio::spawn(async move {
-                            while let Some(test_result) = receiver.recv().await {
+                            while let Some((id, test_result)) = receiver.recv().await {
                                 let data = archive::compress(&[
                                     ("output", test_result.output.as_bytes()),
                                     ("checker_output", test_result.checker_output.as_bytes()),
@@ -43,7 +46,7 @@ impl App {
                                 self_clone
                                     .ws
                                     .send(api::outgo::Msg::TestVerdict {
-                                        test_id: test_result.id,
+                                        test_id: id,
                                         verdict: test_result.verdict,
                                         time: test_result.time,
                                         memory: test_result.memory,
@@ -57,15 +60,23 @@ impl App {
 
                         tokio::spawn(async move {
                             let package = Archive::new(&*data);
-                            let result = self_clone.judger.judge(package, sender).await;
+                            let result =
+                                Arc::clone(&self_clone.judger).judge(package, sender).await;
                             _ = handler.await;
                             match result {
                                 Ok(full_verdict) => self_clone
                                     .ws
-                                    .send(api::outgo::Msg::FullVerdict {
-                                        score: full_verdict.score,
-                                        groups_score: full_verdict.groups_score,
-                                    })
+                                    .send(api::outgo::Msg::FullVerdict(match full_verdict {
+                                        judge::FullResult::Ok {
+                                            score,
+                                            groups_score,
+                                        } => FullVerdict::Ok {
+                                            score,
+                                            groups_score,
+                                        },
+                                        judge::FullResult::Ce(msg) => FullVerdict::Ce(msg),
+                                        judge::FullResult::Te(msg) => FullVerdict::Te(msg),
+                                    }))
                                     .await
                                     .expect("websocket isn't working unexpected"),
                                 Err(error) => {
@@ -119,7 +130,7 @@ async fn main() -> Result<()> {
 
     let app = App {
         ws: ws_client,
-        judger: judge::Service::new(isolate_client, Box::from(work_dir)),
+        judger: Arc::new(judge::Service::new(isolate_client, Box::from(work_dir))),
     };
 
     Arc::new(app).run().await?;

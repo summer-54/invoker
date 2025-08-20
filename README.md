@@ -16,13 +16,25 @@ CLOSE
 ## Outgoing
 ### Full verdict
 ```
-VERDICT <score>
+VERDICT OK
+SUM <score>
 <score group 1>
 <score group 2>
 <score group 3>
 ...
 <score group n>
 ```
+or
+```
+VERDICT CE
+<message>
+```
+or
+```
+VERDICT TE
+<message>
+```
+
 ### Test verdict
 ```
 TEST <id>

@@ -29,11 +29,18 @@ use {
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-enum MaybeLimited<T: Copy> {
+pub enum MaybeLimited<T: Copy> {
     Limited(T),
     Unlimited,
 }
 use MaybeLimited::{Limited, Unlimited};
+
+impl<T: Copy> Default for MaybeLimited<T> {
+    fn default() -> Self {
+        Unlimited
+    }
+}
+
 use tokio_websockets::Message;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -197,18 +204,27 @@ impl Service {
 }
 
 pub struct RunConfig {
-    input_file: Box<str>,
-    output_file: Box<str>,
+    pub time_limit: MaybeLimited<f64>,   // Time limit (in seconds)
+    pub memory_limit: MaybeLimited<u64>, // Memory limit (in KiB)
+    pub real_time_limit: f64,            // Real time limit (in seconds)
+    pub extra_time_limit: Option<f64>,   // Extra time limit (in seconds)
+    pub stack_limit: Option<MaybeLimited<usize>>, // Stack limit (in KiB)
+    pub open_files_limit: Option<MaybeLimited<usize>>,
+    pub proccess_limit: Option<MaybeLimited<usize>>,
+}
 
-    time_limit: MaybeLimited<f64>,   // Time limit (in seconds)
-    memory_limit: MaybeLimited<u64>, // Memory limit (in KiB)
-    real_time_limit: f64,            // Real time limit (in seconds)
-    meta_file: Box<str>,             // Metadata file
-
-    extra_time_limit: Option<f64>, // Extra time limit (in seconds)
-    stack_limit: Option<MaybeLimited<usize>>, // Stack limit (in KiB)
-    open_files_limit: Option<MaybeLimited<usize>>,
-    proccess_limit: Option<MaybeLimited<usize>>,
+impl Default for RunConfig {
+    fn default() -> Self {
+        Self {
+            time_limit: Default::default(),
+            memory_limit: Default::default(),
+            real_time_limit: 10.,
+            extra_time_limit: Default::default(),
+            stack_limit: Default::default(),
+            open_files_limit: Default::default(),
+            proccess_limit: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -228,12 +244,12 @@ impl RunStatus {
 }
 
 pub struct RunResult {
-    status: RunStatus,
-    time: f64,
-    real_time: f64,
-    status_message: Option<Box<str>>,
-    memory: usize,
-    killed: bool,
+    pub status: RunStatus,
+    pub time: f64,
+    pub real_time: f64,
+    pub status_message: Option<Box<str>>,
+    pub memory: usize,
+    pub killed: bool,
 }
 
 pub struct Sandbox {
@@ -253,6 +269,9 @@ impl Drop for Sandbox {
 }
 
 impl Sandbox {
+    pub fn id(&self) -> usize {
+        self.id
+    }
     fn inner_dir(&self) -> Box<str> {
         format!("{}/{}/box", self.service.config.lock_root, self.id).into_boxed_str()
     }
@@ -262,6 +281,7 @@ impl Sandbox {
         target_command: Box<str>,
         input_path: Option<&str>,
         output_path: Option<&str>,
+        error_path: Option<&str>,
         cfg: RunConfig,
     ) -> Result<RunResult> {
         let meta_path = format!("{}/meta", self.inner_dir());
@@ -272,6 +292,17 @@ impl Sandbox {
             .arg(format!("\"{target_command}\""))
             .arg(format!("--box-id={}", self.id))
             .arg(format!("--meta={meta_path}"));
+
+        if let Some(input_path) = input_path {
+            command.arg(format!("--stdin={}", input_path));
+        }
+        if let Some(output_path) = output_path {
+            command.arg(format!("--stdout={}", output_path));
+        }
+        if let Some(error_path) = error_path {
+            command.arg(format!("--stderr={}", error_path));
+        }
+
         if let Limited(time_limit) = cfg.time_limit {
             command.arg(format!("--time={}", time_limit));
         }
@@ -335,12 +366,12 @@ impl Sandbox {
             time: meta["time"].parse()?,
             real_time: meta["time"].parse()?,
             status_message: meta.get("message").cloned(),
-            memory: todo!(),
-            killed: todo!(),
+            memory: meta["max-rss"].parse()?,
+            killed: meta["killed"].parse()?,
         })
     }
 
-    pub async fn write_box<R: AsyncRead + Unpin + ?Sized>(
+    pub async fn write_into_box<R: AsyncRead + Unpin + ?Sized>(
         &self,
         from: &mut R,
         to: &str,
@@ -354,7 +385,7 @@ impl Sandbox {
         Ok(())
     }
 
-    pub async fn read_box<R: AsyncRead + Unpin + ?Sized>(&self, from: &str) -> Result<File> {
+    pub async fn read_from_box(&self, from: &str) -> Result<File> {
         Ok(tokio::fs::File::open(format!("{}/{from}", self.inner_dir())).await?)
     }
 }
