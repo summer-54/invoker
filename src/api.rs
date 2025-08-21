@@ -27,7 +27,7 @@ pub mod outgo {
             test_id: usize,
             verdict: Verdict,
             time: f64,
-            memory: usize,
+            memory: u64,
             data: Box<[u8]>,
         },
         Exited {

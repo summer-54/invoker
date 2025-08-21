@@ -1,31 +1,12 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io::{ErrorKind, Read},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use {
-    futures::Stream,
-    serde::de::DeserializeOwned,
-    tokio::{
-        io::AsyncRead,
-        sync::{
-            Mutex,
-            mpsc::{Receiver, Sender},
-        },
-    },
-};
+use tokio::io::AsyncRead;
 
-use crate::{Error, Result, anyhow, pull::Pull};
+use crate::{Result, anyhow, pull::Pull};
 
 use {
     serde::{Deserialize, Serialize},
-    tokio::{
-        fs::File,
-        io::AsyncWriteExt,
-        process::{Child, Command},
-    },
+    tokio::{fs::File, io::AsyncWriteExt, process::Command},
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -40,8 +21,6 @@ impl<T: Copy> Default for MaybeLimited<T> {
         Unlimited
     }
 }
-
-use tokio_websockets::Message;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IsolateConfig {
@@ -165,10 +144,6 @@ impl Service {
         }))
     }
 
-    pub fn box_dir_path(&self, box_id: usize) -> Box<str> {
-        format!("{}/{box_id}", self.config.lock_root).into_boxed_str()
-    }
-
     pub async fn init_box(self: Arc<Self>) -> Result<Sandbox> {
         let box_id = self.boxes_pull.take().await;
         log::info!("isolate/box<id: {box_id}> starting...");
@@ -195,11 +170,12 @@ impl Service {
 
     pub async fn clean(self: Arc<Self>) {
         log::info!("isolate cleannig...");
-        let output = Command::new(&*self.path)
+        let status = Command::new(&*self.path)
             .arg("--cleanup")
             .status()
             .await
             .unwrap();
+        log::info!("isolate clean with status: {status}")
     }
 }
 
@@ -234,21 +210,15 @@ pub enum RunStatus {
     Ml,
     Re(u8),
     Sg(u8),
-    Te,
 }
 
-impl RunStatus {
-    fn is_success(&self) -> bool {
-        *self == Self::Ok
-    }
-}
-
+#[derive(Debug)]
 pub struct RunResult {
     pub status: RunStatus,
     pub time: f64,
     pub real_time: f64,
     pub status_message: Option<Box<str>>,
-    pub memory: usize,
+    pub memory: u64,
     pub killed: bool,
 }
 
@@ -276,14 +246,7 @@ impl Sandbox {
         format!("{}/{}/box", self.service.config.lock_root, self.id).into_boxed_str()
     }
 
-    pub async fn run(
-        &self,
-        target_command: Box<str>,
-        input_path: Option<&str>,
-        output_path: Option<&str>,
-        error_path: Option<&str>,
-        cfg: RunConfig,
-    ) -> Result<RunResult> {
+    pub async fn run(&self, target_command: Box<str>, cfg: RunConfig) -> Result<RunResult> {
         let meta_path = format!("{}/meta", self.inner_dir());
 
         let mut command = Command::new(&*self.service.path);
@@ -292,16 +255,16 @@ impl Sandbox {
             .arg(format!("\"{target_command}\""))
             .arg(format!("--box-id={}", self.id))
             .arg(format!("--meta={meta_path}"));
-
-        if let Some(input_path) = input_path {
-            command.arg(format!("--stdin={}", input_path));
-        }
-        if let Some(output_path) = output_path {
-            command.arg(format!("--stdout={}", output_path));
-        }
-        if let Some(error_path) = error_path {
-            command.arg(format!("--stderr={}", error_path));
-        }
+        // DEPRECATED (use <command> < input_path > output_path)
+        // if let Some(input_path) = input_path {
+        //     command.arg(format!("--stdin={}", input_path));
+        // }
+        // if let Some(output_path) = output_path {
+        //     command.arg(format!("--stdout={}", output_path));
+        // }
+        // if let Some(error_path) = error_path {
+        //     command.arg(format!("--stderr={}", error_path));
+        // }
 
         if let Limited(time_limit) = cfg.time_limit {
             command.arg(format!("--time={}", time_limit));
@@ -323,7 +286,7 @@ impl Sandbox {
             command.arg(format!("--stack={}", stack_limit));
         }
         if let Limited(open_files_limit) = cfg
-            .stack_limit
+            .open_files_limit
             .unwrap_or(self.service.config.open_files_default_limit)
         {
             command.arg(format!("--open_files_limit={}", open_files_limit));
@@ -340,7 +303,7 @@ impl Sandbox {
             self.id
         );
 
-        let status = command.status();
+        _ = command.status().await?;
 
         let meta = tokio::fs::read_to_string(meta_path)
             .await?
@@ -352,11 +315,14 @@ impl Sandbox {
             .collect::<Option<HashMap<Box<str>, Box<str>>>>()
             .ok_or(anyhow!("incorrect meta file (so strange)"))?;
 
-        Ok(RunResult {
+        let result = RunResult {
             status: if let Some(status) = meta.get("status") {
                 match &**status {
                     "RE" => RunStatus::Re(meta["exitcode"].parse()?),
-                    "SG" => RunStatus::Sg(meta["exitsig"].parse()?),
+                    "SG" => match meta["exitsig"].parse()? {
+                        6 | 11 => RunStatus::Ml,
+                        signal => RunStatus::Sg(signal),
+                    },
                     "TO" => RunStatus::Tl,
                     _ => return Err(anyhow!("incorrect WebSocker")),
                 }
@@ -364,11 +330,15 @@ impl Sandbox {
                 RunStatus::Ok
             },
             time: meta["time"].parse()?,
-            real_time: meta["time"].parse()?,
+            real_time: meta["time-wall"].parse()?,
             status_message: meta.get("message").cloned(),
             memory: meta["max-rss"].parse()?,
-            killed: meta["killed"].parse()?,
-        })
+            killed: meta["killed"].parse::<u8>()? == 1,
+        };
+
+        log::info!("run result: {result:?}");
+
+        Ok(result)
     }
 
     pub async fn write_into_box<R: AsyncRead + Unpin + ?Sized>(

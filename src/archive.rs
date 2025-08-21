@@ -1,6 +1,6 @@
 use {
     async_compression::tokio::{bufread::GzipDecoder, write::GzipEncoder},
-    tokio::io::{AsyncBufRead, AsyncWriteExt, BufReader},
+    tokio::io::{AsyncBufRead, AsyncWriteExt},
     tokio_tar::{Archive, Builder, Header},
 };
 
@@ -41,6 +41,7 @@ async fn compression() {
 
 #[tokio::test]
 async fn decompression() {
+    use tokio::io::BufReader;
     let f = tokio::fs::File::open("test1.tar.gz").await.unwrap();
     let mut buf = BufReader::new(f);
     let mut arc = decompress::<&mut BufReader<tokio::fs::File>>(&mut buf).await;

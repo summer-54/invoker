@@ -18,6 +18,7 @@ CLOSE
 ```
 VERDICT OK
 SUM <score>
+<score group 0>
 <score group 1>
 <score group 2>
 <score group 3>
@@ -41,7 +42,7 @@ TEST <id>
 VERDICT <verdict>
 TIME <time>
 MEMORY <memory>
-<data: tar: (output, checker_output)>
+<data: tar: (output, message)>
 ```
 ### Exited
 ```

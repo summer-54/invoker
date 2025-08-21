@@ -7,7 +7,7 @@ mod ws;
 
 use tokio::io::{AsyncReadExt, stdin};
 
-use crate::api::outgo::{self, FullVerdict};
+use crate::api::outgo::FullVerdict;
 
 pub use {
     anyhow::{Error, Result, anyhow},
@@ -15,7 +15,7 @@ pub use {
 };
 
 use std::{str::FromStr, sync::Arc};
-use {tokio::sync::mpsc::unbounded_channel, tokio_tar::Archive, ws::Uri};
+use {tokio::sync::mpsc::unbounded_channel, ws::Uri};
 
 struct App {
     pub ws: ws::Service,
@@ -26,6 +26,7 @@ impl App {
     pub async fn run(self: Arc<Self>) -> Result<()> {
         tokio::spawn(async move {
             loop {
+                log::info!("ws message waiting");
                 let msg = self.ws.recv().await?;
                 match msg {
                     api::income::Msg::Start { data } => {
@@ -36,7 +37,7 @@ impl App {
                             while let Some((id, test_result)) = receiver.recv().await {
                                 let data = archive::compress(&[
                                     ("output", test_result.output.as_bytes()),
-                                    ("checker_output", test_result.checker_output.as_bytes()),
+                                    ("message", test_result.message.as_bytes()),
                                 ])
                                 .await
                                 .unwrap_or_else(|e| {
@@ -59,7 +60,7 @@ impl App {
                         let self_clone = Arc::clone(&self);
 
                         tokio::spawn(async move {
-                            let package = Archive::new(&*data);
+                            let package = archive::decompress(&*data).await;
                             let result =
                                 Arc::clone(&self_clone.judger).judge(package, sender).await;
                             _ = handler.await;
@@ -123,14 +124,16 @@ async fn main() -> Result<()> {
     log::warn!("{work_dir} can be cleared. Press any key to continue ...");
 
     let mut _buf = vec![];
-    stdin().read_buf(&mut _buf);
+    stdin().read_buf(&mut _buf).await?;
 
     let ws_client = ws::Service::from_uri(task_manager_uri).await?;
     let isolate_client = sandboxes::isolate::Service::new(&config_dir).await?;
 
     let app = App {
         ws: ws_client,
-        judger: Arc::new(judge::Service::new(isolate_client, Box::from(work_dir))),
+        judger: Arc::new(
+            judge::Service::new(isolate_client, format!("{work_dir}/judge").into_boxed_str()).await,
+        ),
     };
 
     Arc::new(app).run().await?;

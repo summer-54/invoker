@@ -1,6 +1,6 @@
 const COMPILATION_TIME_LIMIT: f64 = 10.;
 
-use tokio::io::AsyncReadExt;
+use tokio::{fs::create_dir, io::AsyncReadExt};
 
 use {
     serde::{Deserialize, Serialize},
@@ -11,14 +11,14 @@ use {
     },
 };
 
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     Result,
-    sandboxes::isolate::{self, IsolateConfig, MaybeLimited, RunConfig, RunResult, Sandbox},
+    sandboxes::isolate::{self, MaybeLimited, RunConfig, RunStatus, Sandbox},
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 enum ProblemType {
     Standart,
@@ -29,25 +29,19 @@ struct ProblemLimits {
     time: f64,
     real_time: f64,
 
-    memory: usize,
+    memory: u64,
     stack: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct TestsRange(usize, usize);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct Group {
     id: usize,
     range: TestsRange,
     cost: usize,
     depends: Box<[usize]>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TestsConfig {
-    count: usize,
-    groups: Box<[Group]>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -71,7 +65,7 @@ struct ProblemConfig {
     r#type: ProblemType,
     lang: Lang,
     limits: ProblemLimits,
-    tests: TestsConfig,
+    groups: Box<[Group]>,
 }
 
 pub enum FullResult {
@@ -87,22 +81,41 @@ pub enum FullResult {
 pub struct TestResult {
     pub verdict: Verdict,
     pub time: f64,
-    pub memory: usize,
+    pub memory: u64,
 
     pub output: Arc<str>,
-    pub checker_output: Arc<str>,
+    pub message: Arc<str>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Ok, //ok
     Wa, //wrong answer
+    Pe, //presentation error
     Ml, //memory limit
     Tl, //time limit
     Re, //runtime error
     Ce, //compile error
     Te, //testing system error
     Sl, //stack limit
+}
+
+impl Verdict {
+    pub fn match_error(status: isolate::RunStatus) -> Option<Self> {
+        Some(match status {
+            isolate::RunStatus::Ok => return None,
+            isolate::RunStatus::Tl => Self::Tl,
+            isolate::RunStatus::Ml => Self::Ml,
+            isolate::RunStatus::Re(_) => Self::Re,
+            isolate::RunStatus::Sg(_) => Self::Re,
+        })
+    }
+}
+
+impl Verdict {
+    pub fn is_success(&self) -> bool {
+        *self == Verdict::Ok
+    }
 }
 
 impl std::fmt::Display for Verdict {
@@ -113,6 +126,7 @@ impl std::fmt::Display for Verdict {
             match self {
                 Verdict::Ok => "OK",
                 Verdict::Wa => "WA",
+                Verdict::Pe => "PE",
                 Verdict::Ml => "ML",
                 Verdict::Tl => "TL",
                 Verdict::Re => "RE",
@@ -133,7 +147,8 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(isolate: Arc<isolate::Service>, work_dir: Box<str>) -> Service {
+    pub async fn new(isolate: Arc<isolate::Service>, work_dir: Box<str>) -> Service {
+        create_dir(&*work_dir).await.unwrap();
         Service {
             work_dir,
             isolate,
@@ -142,8 +157,137 @@ impl Service {
         }
     }
 
-    pub async fn test(&self, sandbox: Sandbox, lang: Lang) -> TestResult {
-        todo!()
+    async fn test(
+        &self,
+        sandbox: Sandbox,
+        problem_config: Arc<ProblemConfig>,
+        test_id: usize,
+    ) -> Result<TestResult> {
+        let limits = &problem_config.limits;
+        let result = match problem_config.r#type {
+            ProblemType::Standart => {
+                let input_path = format!("{}/inupt/{test_id}.txt", self.work_dir).into_boxed_str();
+                let correct_path =
+                    format!("{}/correct/{test_id}.txt", self.work_dir).into_boxed_str();
+                let checker_path = format!("{}/checker.out", self.work_dir).into_boxed_str();
+
+                sandbox
+                    .write_into_box(&mut File::open(&*input_path).await?, "in.txt")
+                    .await?;
+                let solution_result = match sandbox
+                    .run(
+                        format!("./solution.out > out.txt < in.txt").into_boxed_str(),
+                        RunConfig {
+                            time_limit: MaybeLimited::Limited(limits.time),
+                            memory_limit: MaybeLimited::Limited(limits.memory),
+                            real_time_limit: limits.real_time,
+                            extra_time_limit: None,
+                            stack_limit: Some(MaybeLimited::Limited(limits.stack)),
+                            open_files_limit: None,
+                            proccess_limit: None,
+                        },
+                    )
+                    .await
+                {
+                    Ok(res) => res,
+                    Err(e) => {
+                        log::error!("run_solution erorr: {e}");
+                        return Err(e);
+                    }
+                };
+
+                let mut output_file = sandbox.read_from_box("out.txt").await?;
+                let mut output = String::new();
+                output_file.read_to_string(&mut output).await?;
+                let output = Arc::from(output.as_str());
+
+                if let Some(verdict) = Verdict::match_error(solution_result.status) {
+                    return Ok(TestResult {
+                        verdict,
+                        time: solution_result.time,
+                        memory: solution_result.memory,
+                        output,
+                        message: Arc::from(
+                            format!(
+                                "ISOLATE: {}",
+                                solution_result.status_message.unwrap_or(Box::from("-"))
+                            )
+                            .as_str(),
+                        ),
+                    });
+                }
+
+                if let Ok(mut correct) = File::open(&*correct_path).await {
+                    sandbox.write_into_box(&mut correct, "correct").await?;
+                }
+
+                sandbox
+                    .write_into_box(&mut File::open(&*checker_path).await?, "correct.txt")
+                    .await?;
+                let checker_result = match sandbox
+                    .run(
+                        format!("./checker.out in.txt out.txt correct.txt > checker_outputs.txt")
+                            .into_boxed_str(),
+                        RunConfig {
+                            time_limit: MaybeLimited::Limited(limits.time),
+                            memory_limit: MaybeLimited::Unlimited,
+                            real_time_limit: limits.real_time,
+                            extra_time_limit: None,
+                            stack_limit: Some(MaybeLimited::Unlimited),
+                            open_files_limit: Some(MaybeLimited::Unlimited),
+                            proccess_limit: None,
+                        },
+                    )
+                    .await
+                {
+                    Ok(res) => res,
+                    Err(e) => {
+                        log::error!("checker erorr: {e}");
+                        return Err(e);
+                    }
+                };
+
+                let mut checker_output_file = sandbox.read_from_box("out.txt").await?;
+                let mut checker_output = String::new();
+                checker_output_file
+                    .read_to_string(&mut checker_output)
+                    .await?;
+                let (verdict, message) = match checker_result.status {
+                    RunStatus::Ml | RunStatus::Tl | RunStatus::Sg(_) => (
+                        Verdict::Te,
+                        format!(
+                            "CHECKER: {checker_output} \n 'isolate': {}",
+                            checker_result.status_message.as_deref().unwrap_or("")
+                        ),
+                    ),
+                    RunStatus::Ok => (
+                        Verdict::Ok,
+                        format!(
+                            "CHECKER: {checker_output} \n 'isolate': {}",
+                            checker_result.status_message.as_deref().unwrap_or("")
+                        ),
+                    ),
+                    RunStatus::Re(code) => (
+                        match code {
+                            1 => Verdict::Wa,
+                            2 => Verdict::Pe,
+                            _ => Verdict::Te,
+                        },
+                        format!("CHECKER: {checker_output}"),
+                    ),
+                };
+
+                TestResult {
+                    verdict,
+                    message: Arc::from(message),
+
+                    output,
+                    memory: solution_result.memory,
+                    time: solution_result.time,
+                }
+            }
+        };
+        Ok(result)
     }
 
     pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
@@ -159,89 +303,124 @@ impl Service {
             .await?
             .read_to_string(&mut text)
             .await?;
-        let problem_config: ProblemConfig = serde_yml::from_str(text.as_str())?;
+        let problem_config: Arc<ProblemConfig> = Arc::new(serde_yml::from_str(text.as_str())?);
         let lang = problem_config.lang;
-        match problem_config.r#type {
-            ProblemType::Standart => {
-                let sandbox = Arc::clone(&self.isolate).init_box().await?;
+
+        let sandbox = Arc::clone(&self.isolate).init_box().await?;
+        sandbox
+            .write_into_box(
+                &mut File::open(format!("{}/solution.cpp", &*self.work_dir)).await?,
+                "solution.cpp",
+            )
+            .await?;
+
+        let compile_errors_path = "compile_errors";
+        let compile_result = sandbox
+            .run(
+                lang.compile_command("solution", "solution.out"),
+                RunConfig {
+                    open_files_limit: Some(MaybeLimited::Unlimited),
+                    time_limit: MaybeLimited::Limited(COMPILATION_TIME_LIMIT),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        log::info!("compiling isolate/sandbox<id: {}>", sandbox.id());
+
+        match compile_result.status {
+            isolate::RunStatus::Tl | isolate::RunStatus::Ml | isolate::RunStatus::Sg(_) => {
+                let mut message = String::new();
                 sandbox
-                    .write_into_box(
-                        &mut File::open(format!("{}/solution.cpp", &*self.work_dir)).await?,
-                        "solution.cpp",
-                    )
+                    .read_from_box(compile_errors_path)
+                    .await?
+                    .read_to_string(&mut message)
                     .await?;
 
-                let compile_errors_path = "compile_errors";
-                let compile_result = sandbox
-                    .run(
-                        lang.compile_command("solution", "solution.out"),
-                        None,
-                        None,
-                        Some(compile_errors_path),
-                        RunConfig {
-                            open_files_limit: Some(MaybeLimited::Unlimited),
-                            ..Default::default()
-                        },
-                    )
-                    .await?;
-
-                log::info!("compiling isolate/sandbox<id: {}>", sandbox.id());
-
-                match compile_result.status {
-                    isolate::RunStatus::Tl | isolate::RunStatus::Ml | isolate::RunStatus::Sg(_) => {
-                        let mut message = String::new();
-                        sandbox
-                            .read_from_box(compile_errors_path)
-                            .await?
-                            .read_to_string(&mut message);
-
-                        return Ok(FullResult::Te(message.into_boxed_str()));
-                    }
-                    isolate::RunStatus::Re(_) => {
-                        let mut message = String::new();
-                        sandbox
-                            .read_from_box(compile_errors_path)
-                            .await?
-                            .read_to_string(&mut message);
-
-                        return Ok(FullResult::Ce(message.into_boxed_str()));
-                    }
-                    isolate::RunStatus::Te => {
-                        return Ok(FullResult::Te(String::new().into_boxed_str()));
-                    }
-                    _ => (),
-                }
-
-                drop(sandbox);
-
-                let test_counts = problem_config.tests.count;
-
-                let blocks = vec![-1];
-
-                let mut handles = vec![];
-                let tests_blocked =
-                    Arc::new(Mutex::new(vec![false; test_counts].into_boxed_slice()));
-                let blocked_groups = Arc::new(Mutex::new(
-                    vec![false; problem_config.tests.groups.len()].into_boxed_slice(),
-                ));
-                for group in problem_config.tests.groups {
-                    for test_number in (group.range.0 - 1)..group.range.1 {
-                        let sandbox = Arc::clone(&self.isolate).init_box().await?;
-                        let self_clone = Arc::clone(&self);
-                        let sender = sender.clone();
-                        handles.push(tokio::spawn(async move {
-                            let result = self_clone.test(sandbox, lang).await;
-                            sender.send((test_number + 1, result.clone())).unwrap();
-                            result
-                        }));
-                    }
-                }
+                return Ok(FullResult::Te(message.into_boxed_str()));
             }
+            isolate::RunStatus::Re(_) => {
+                let mut message = String::new();
+                sandbox
+                    .read_from_box(compile_errors_path)
+                    .await?
+                    .read_to_string(&mut message)
+                    .await?;
+
+                return Ok(FullResult::Ce(message.into_boxed_str()));
+            }
+            _ => (),
+        }
+
+        drop(sandbox);
+
+        let mut handlers: Vec<JoinHandle<Result<()>>> = vec![];
+        // let blocked_tests =
+        //     Arc::new(Mutex::new(vec![false; test_counts].into_boxed_slice()));
+        let blocked_groups = Arc::new(Mutex::new(
+            vec![None; problem_config.groups.len()].into_boxed_slice(),
+        ));
+        for group in problem_config.groups.clone() {
+            'test: for test_number in (group.range.0 - 1)..group.range.1 {
+                if blocked_groups.lock().await[group.id].is_some() {
+                    continue;
+                }
+                for depend in &group.depends {
+                    if blocked_groups.lock().await[*depend].is_some() {
+                        continue 'test;
+                    }
+                }
+                let sandbox = Arc::clone(&self.isolate).init_box().await?;
+
+                let blocked_groups = Arc::clone(&blocked_groups);
+                let self_clone = Arc::clone(&self);
+                let sender = sender.clone();
+
+                let problem_config = Arc::clone(&problem_config);
+
+                handlers.push(tokio::spawn(async move {
+                    let result = self_clone
+                        .test(sandbox, problem_config, test_number)
+                        .await?;
+                    sender.send((test_number + 1, result.clone())).unwrap();
+                    if !result.verdict.is_success() {
+                        let block = &mut blocked_groups.lock().await[group.id];
+                        if let Some(id) = block {
+                            *block = Some(std::cmp::min(*id, test_number));
+                        } else {
+                            *block = Some(test_number);
+                        }
+                        blocked_groups.lock().await[group.id] = Some(test_number);
+                    }
+                    Ok(())
+                }));
+            }
+        }
+
+        for handler in handlers {
+            _ = handler.await?;
+        }
+        let blocked_groups = blocked_groups.lock().await;
+
+        let groups_score: Box<[usize]> = (0..problem_config.groups.len())
+            .into_iter()
+            .map(|i| {
+                if blocked_groups[i].is_none() {
+                    problem_config.groups[i].cost
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let result = FullResult::Ok {
+            score: groups_score.iter().sum(),
+            groups_score,
         };
 
         remove_dir(&*self.work_dir).await?;
+        tokio::fs::create_dir(&*self.work_dir).await?;
         drop(permit);
-        todo!("run result")
+        Ok(result)
     }
 
     pub async fn stop_all(&self) -> Result<()> {
