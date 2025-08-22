@@ -10,15 +10,22 @@ pub async fn decompress<R: AsyncBufRead + Unpin>(data: R) -> Archive<GzipDecoder
     Archive::new(GzipDecoder::new(data))
 }
 
-pub async fn compress(items: &[(&str, &[u8])]) -> Result<Box<[u8]>> {
+pub struct ArchiveItem<'a> {
+    pub path: &'a str,
+    pub data: &'a [u8],
+}
+
+pub async fn compress<'a>(items: &[ArchiveItem<'a>]) -> Result<Box<[u8]>> {
     let mut archive_builder = Builder::new(GzipEncoder::new(Vec::new()));
-    for (path, item) in Box::<[(&str, &[u8])]>::from(items) {
+    for ArchiveItem { path, data } in items {
         let mut header = Header::new_gnu();
-        header.set_size(item.len() as u64);
+        header.set_size(data.len() as u64);
         header.set_mode(0o777);
         header.set_cksum();
 
-        archive_builder.append_data(&mut header, path, item).await?;
+        archive_builder
+            .append_data(&mut header, path, *data)
+            .await?;
     }
     archive_builder.finish().await?;
     let mut archive = archive_builder.into_inner().await?;
@@ -31,9 +38,12 @@ pub async fn compress(items: &[(&str, &[u8])]) -> Result<Box<[u8]>> {
 async fn compression() {
     let mut f = tokio::fs::File::create("test1.tar.gz").await.unwrap();
     f.write_all(
-        &*compress(&*vec![("a.txt", "aboba".as_bytes())])
-            .await
-            .unwrap(),
+        &*compress(&*vec![ArchiveItem {
+            path: "a.txt",
+            data: "aboba".as_bytes(),
+        }])
+        .await
+        .unwrap(),
     )
     .await
     .unwrap();

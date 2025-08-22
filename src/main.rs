@@ -7,7 +7,7 @@ mod ws;
 
 use tokio::io::{AsyncReadExt, stdin};
 
-use crate::api::outgo::FullVerdict;
+use crate::{api::outgo::FullVerdict, archive::ArchiveItem};
 
 pub use {
     anyhow::{Error, Result, anyhow},
@@ -26,7 +26,7 @@ impl App {
     pub async fn run(self: Arc<Self>) -> Result<()> {
         tokio::spawn(async move {
             loop {
-                log::info!("ws message waiting");
+                log::info!("waiting for message...");
                 let msg = self.ws.recv().await?;
                 match msg {
                     api::income::Msg::Start { data } => {
@@ -36,12 +36,18 @@ impl App {
                         let handler = tokio::spawn(async move {
                             while let Some((id, test_result)) = receiver.recv().await {
                                 let data = archive::compress(&[
-                                    ("output", test_result.output.as_bytes()),
-                                    ("message", test_result.message.as_bytes()),
+                                    ArchiveItem {
+                                        path: "output",
+                                        data: test_result.output.as_bytes(),
+                                    },
+                                    ArchiveItem {
+                                        path: "message",
+                                        data: test_result.message.as_bytes(),
+                                    },
                                 ])
                                 .await
                                 .unwrap_or_else(|e| {
-                                    log::error!("file compressing error: {e}");
+                                    log::error!("sennding 'TestVerdict': compression error: {e}");
                                     vec![].into_boxed_slice()
                                 });
                                 self_clone
@@ -79,9 +85,12 @@ impl App {
                                         judge::FullResult::Te(msg) => FullVerdict::Te(msg),
                                     }))
                                     .await
-                                    .expect("websocket isn't working unexpected"),
+                                    .map_err(|e| {
+                                        log::error!("sending message error: {e:?}");
+                                    })
+                                    .expect("message sending error"),
                                 Err(error) => {
-                                    log::error!("judger error:\n{error}");
+                                    log::error!("judger error: {error}");
                                     self_clone
                                         .ws
                                         .send(api::outgo::Msg::Error {
@@ -97,7 +106,7 @@ impl App {
                     api::income::Msg::Close => break,
                 }
             }
-            log::info!("invoker was closed ws message");
+            log::info!("message listner close close");
             Result::<()>::Ok(())
         })
         .await?

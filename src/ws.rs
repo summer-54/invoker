@@ -43,17 +43,17 @@ impl Service {
                         score,
                         groups_score,
                     } => {
-                        let mut ws_msg = format!("VERDICT OK\nSUM {score}\n GROUPS\n");
+                        let mut ws_msg = format!("VERDICT OK\nSUM {score}\n");
                         for score in groups_score {
                             ws_msg.push_str(&format!("{score}\n"));
                         }
                         ws_msg
                     }
                     outgo::FullVerdict::Ce(msg) => {
-                        format!("VERDICT CE\n {msg}")
+                        format!("VERDICT CE\n {msg}\n")
                     }
                     outgo::FullVerdict::Te(msg) => {
-                        format!("VERDICT CE\n {msg}")
+                        format!("VERDICT CE\n {msg}\n")
                     }
                 }
                 .into_bytes(),
@@ -106,10 +106,12 @@ impl Service {
                 "STOP" => income::Msg::Stop,
                 "CLOSE" => income::Msg::Close,
                 command => {
-                    log::error!("incorrect command in incomming websocket message: {command}");
+                    log::error!("incomming websocket message: incorrect command: {command}");
                     continue;
                 }
             };
+
+            log::info!("recieved message: {msg:?}");
             return Ok(msg);
         }
     }

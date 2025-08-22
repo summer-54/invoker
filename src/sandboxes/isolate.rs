@@ -255,6 +255,7 @@ impl Sandbox {
             .arg(format!("\"{target_command}\""))
             .arg(format!("--box-id={}", self.id))
             .arg(format!("--meta={meta_path}"));
+
         // DEPRECATED (use <command> < input_path > output_path)
         // if let Some(input_path) = input_path {
         //     command.arg(format!("--stdin={}", input_path));
