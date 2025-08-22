@@ -26,3 +26,4 @@ serde_yml = { version = "*" }
 
 tokio-tar = { version = "*" }
 async-compression = { version = "*", features = ["all"] }
+uuid = { version = "*", features = ["v4"] }

@@ -3,6 +3,7 @@ use crate::{
     api::{income, outgo},
 };
 pub use http::Uri;
+use uuid::Uuid;
 
 use {
     futures::{
@@ -22,10 +23,14 @@ impl Service {
     pub async fn from_uri(uri: Uri) -> Result<Service> {
         let (client, _) = ClientBuilder::from_uri(uri).connect().await?;
         let (write, read) = client.split();
-        Ok(Self {
+        let this = Self {
             write: Mutex::new(write),
             read: Mutex::new(read),
-        })
+        };
+        let token = Uuid::new_v4();
+        println!("login in invoker manager with token: {token}");
+        this.send(outgo::Msg::Token(token)).await?;
+        Ok(this)
     }
     pub async fn send(&self, msg: outgo::Msg) -> Result<()> {
         log::info!("sending: {msg:?}");
@@ -71,6 +76,7 @@ impl Service {
                 }
                 outgo::Msg::Error { msg } => format!("ERROR\n{msg}\n").into_bytes(),
                 outgo::Msg::OpError { msg } => format!("OPERROR\n{msg}\n").into_bytes(),
+                outgo::Msg::Token(token) => format!("TOKEN\n{}\n", token.as_u128()).into_bytes(),
             }))
             .await?;
         Ok(())

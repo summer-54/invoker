@@ -22,6 +22,7 @@ pub mod outgo {
 
     #[derive(Debug)]
     pub enum Msg {
+        Token(uuid::Uuid),
         FullVerdict(FullVerdict),
         TestVerdict {
             test_id: usize,
