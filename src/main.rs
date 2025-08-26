@@ -116,6 +116,10 @@ impl App {
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
+
+    let task_manager_host = std::env::var("TASK_MANAGER_HOST")
+        .expect("enviroment variable 'TASK_MANAGER_HOST' not found");
+
     let task_manager_uri = Uri::from_str(
         std::env::var("TASK_MANAGER_WS_URI")
             .expect("enviroment variable 'TASK_MANAGER_WS_URI' not found")
@@ -135,7 +139,7 @@ async fn main() -> Result<()> {
     let mut _buf = vec![];
     stdin().read_buf(&mut _buf).await?;
 
-    let ws_client = ws::Service::from_uri(task_manager_uri).await?;
+    let ws_client = ws::Service::from_uri(task_manager_host, task_manager_uri).await?;
     let isolate_client = sandboxes::isolate::Service::new(&config_dir).await?;
 
     let app = App {

@@ -3,26 +3,37 @@ use crate::{
     api::{income, outgo},
 };
 pub use http::Uri;
+use ratchet_rs::{
+    Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
+    deflate::{DeflateConfig, DeflateDecoder, DeflateEncoder, DeflateExtProvider},
+    subscribe_with,
+};
+use tokio::net::ToSocketAddrs;
 use uuid::Uuid;
 
-use {
-    futures::{
-        SinkExt, StreamExt,
-        stream::{SplitSink, SplitStream},
-    },
-    tokio::{net::TcpStream, sync::Mutex},
-    tokio_websockets::{ClientBuilder, MaybeTlsStream, Message, WebSocketStream},
-};
+use tokio::{net::TcpStream, sync::Mutex};
 
 pub struct Service {
-    read: Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-    write: Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
+    read: Mutex<Receiver<TcpStream, DeflateDecoder>>,
+    write: Mutex<Sender<TcpStream, DeflateEncoder>>,
 }
 
 impl Service {
-    pub async fn from_uri(uri: Uri) -> Result<Service> {
-        let (client, _) = ClientBuilder::from_uri(uri).connect().await?;
-        let (write, read) = client.split();
+    pub async fn from_uri<A: ToSocketAddrs>(socket_add: A, uri: Uri) -> Result<Service> {
+        let stream = TcpStream::connect(socket_add).await?;
+        let client = subscribe_with(
+            WebSocketConfig::default(),
+            stream,
+            uri,
+            DeflateExtProvider::with_config(DeflateConfig::default()),
+            SubprotocolRegistry::default(),
+        )
+        .await?;
+        let UpgradedClient {
+            websocket,
+            subprotocol,
+        } = client;
+        let (write, read) = websocket.split()?;
         let this = Self {
             write: Mutex::new(write),
             read: Mutex::new(read),
@@ -37,60 +48,59 @@ impl Service {
         self.write
             .lock()
             .await
-            .send(Message::binary(match msg {
-                outgo::Msg::FullVerdict(verdict) => match verdict {
-                    outgo::FullVerdict::Ok {
-                        score,
-                        groups_score,
-                    } => {
-                        let mut ws_msg = format!("VERDICT OK\nSUM {score}\n");
-                        for score in groups_score {
-                            ws_msg.push_str(&format!("{score}\n"));
+            .write(
+                match msg {
+                    outgo::Msg::FullVerdict(verdict) => match verdict {
+                        outgo::FullVerdict::Ok {
+                            score,
+                            groups_score,
+                        } => {
+                            let mut ws_msg = format!("VERDICT OK\nSUM {score}\n");
+                            for score in groups_score {
+                                ws_msg.push_str(&format!("{score}\n"));
+                            }
+                            ws_msg
                         }
-                        ws_msg
+                        outgo::FullVerdict::Ce(msg) => {
+                            format!("VERDICT CE\n {msg}\n")
+                        }
+                        outgo::FullVerdict::Te(msg) => {
+                            format!("VERDICT CE\n {msg}\n")
+                        }
                     }
-                    outgo::FullVerdict::Ce(msg) => {
-                        format!("VERDICT CE\n {msg}\n")
+                    .into_bytes(),
+                    outgo::Msg::TestVerdict {
+                        test_id,
+                        verdict,
+                        time,
+                        memory,
+                        data,
+                    } => {
+                        let mut bin_msg = format!(
+                            "TEST {test_id}\nVERDICT {verdict}\nTIME {time}\nMEMORY {memory}\n"
+                        )
+                        .into_bytes();
+                        bin_msg.append(&mut data.into_vec());
+                        bin_msg
                     }
-                    outgo::FullVerdict::Te(msg) => {
-                        format!("VERDICT CE\n {msg}\n")
+                    outgo::Msg::Exited { code, data } => {
+                        format!("EXITED {code}\n{}\n", data).into_bytes()
                     }
-                }
-                .into_bytes(),
-                outgo::Msg::TestVerdict {
-                    test_id,
-                    verdict,
-                    time,
-                    memory,
-                    data,
-                } => {
-                    let mut bin_msg = format!(
-                        "TEST {test_id}\nVERDICT {verdict}\nTIME {time}\nMEMORY {memory}\n"
-                    )
-                    .into_bytes();
-                    bin_msg.append(&mut data.into_vec());
-                    bin_msg
-                }
-                outgo::Msg::Exited { code, data } => {
-                    format!("EXITED {code}\n{}\n", data).into_bytes()
-                }
-                outgo::Msg::Error { msg } => format!("ERROR\n{msg}\n").into_bytes(),
-                outgo::Msg::OpError { msg } => format!("OPERROR\n{msg}\n").into_bytes(),
-                outgo::Msg::Token(token) => format!("TOKEN\n{}\n", token.as_u128()).into_bytes(),
-            }))
+                    outgo::Msg::Error { msg } => format!("ERROR\n{msg}\n").into_bytes(),
+                    outgo::Msg::OpError { msg } => format!("OPERROR\n{msg}\n").into_bytes(),
+                    outgo::Msg::Token(token) => {
+                        format!("TOKEN\n{}\n", token.as_u128()).into_bytes()
+                    }
+                },
+                ratchet_rs::PayloadType::Binary,
+            )
             .await?;
         Ok(())
     }
     pub async fn recv(&self) -> Result<income::Msg> {
         loop {
-            let data = &*self
-                .read
-                .lock()
-                .await
-                .next()
-                .await
-                .ok_or(anyhow!("websocket connection was closed"))??
-                .into_payload();
+            let mut data = bytes::BytesMut::new();
+            self.read.lock().await.read(&mut data).await?;
 
             let Some(pos) = data.iter().position(|&b| b == ('\n' as u8)) else {
                 continue;

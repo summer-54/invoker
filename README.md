@@ -3,7 +3,7 @@
 ### Start task
 ```
 START
-<binary data>
+<binary data: tar.gz: problem_template>
 ```
 ### Stop task
 ```
@@ -42,7 +42,7 @@ TEST <id>
 VERDICT <verdict>
 TIME <time>
 MEMORY <memory>
-<data: tar: (output, message)>
+<data: tar.gz: (output, message)>
 ```
 ### Exited
 ```

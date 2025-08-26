@@ -11,11 +11,15 @@ log = { version = "*" }
 env_logger = { version = "*" }
 
 tokio = { version = "*", features = ["full"] }
-tokio-websockets = { version = "*", features = [
-    "client",
-    "openssl",
-    "fastrand",
-] }
+# tokio-websockets = { version = "*", features = [
+#     "client",
+#     "openssl",
+#     "fastrand",
+# ] }
+
+ratchet_rs = { version = "*", features = ["deflate", "split"] }
+bytes = { version = "*" }
+
 futures = { version = "*" }
 
 http = { version = "*" }
