@@ -11,11 +11,6 @@ log = { version = "*" }
 env_logger = { version = "*" }
 
 tokio = { version = "*", features = ["full"] }
-# tokio-websockets = { version = "*", features = [
-#     "client",
-#     "openssl",
-#     "fastrand",
-# ] }
 
 ratchet_rs = { version = "*", features = ["deflate", "split"] }
 bytes = { version = "*" }
@@ -29,5 +24,6 @@ serde = { version = "*", features = ["derive"] }
 serde_yml = { version = "*" }
 
 tokio-tar = { version = "*" }
-async-compression = { version = "*", features = ["all"] }
+
 uuid = { version = "*", features = ["v4"] }
+envy = { version = "*" }

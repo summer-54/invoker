@@ -1,17 +1,22 @@
 use crate::{
-    Result, anyhow,
+    Result,
     api::{income, outgo},
 };
-pub use http::Uri;
-use ratchet_rs::{
-    Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
-    deflate::{DeflateConfig, DeflateDecoder, DeflateEncoder, DeflateExtProvider},
-    subscribe_with,
-};
-use tokio::net::ToSocketAddrs;
-use uuid::Uuid;
 
-use tokio::{net::TcpStream, sync::Mutex};
+pub use http::Uri;
+
+use {
+    ratchet_rs::{
+        Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
+        deflate::{DeflateConfig, DeflateDecoder, DeflateEncoder, DeflateExtProvider},
+        subscribe_with,
+    },
+    tokio::{
+        net::{TcpStream, ToSocketAddrs},
+        sync::Mutex,
+    },
+    uuid::Uuid,
+};
 
 pub struct Service {
     read: Mutex<Receiver<TcpStream, DeflateDecoder>>,
@@ -19,7 +24,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub async fn from_uri<A: ToSocketAddrs>(socket_add: A, uri: Uri) -> Result<Service> {
+    pub async fn new<A: ToSocketAddrs>(socket_add: A, uri: Uri) -> Result<Service> {
         let stream = TcpStream::connect(socket_add).await?;
         let client = subscribe_with(
             WebSocketConfig::default(),
@@ -33,15 +38,14 @@ impl Service {
             websocket,
             subprotocol,
         } = client;
+
+        log::info!("websocket subprotocol: {subprotocol:?}");
+
         let (write, read) = websocket.split()?;
-        let this = Self {
+        Ok(Self {
             write: Mutex::new(write),
             read: Mutex::new(read),
-        };
-        let token = Uuid::new_v4();
-        println!("login in invoker manager with token: {token}");
-        this.send(outgo::Msg::Token(token)).await?;
-        Ok(this)
+        })
     }
     pub async fn send(&self, msg: outgo::Msg) -> Result<()> {
         log::info!("sending: {msg:?}");

@@ -5,17 +5,26 @@ mod pull;
 mod sandboxes;
 mod ws;
 
-use tokio::io::{AsyncReadExt, stdin};
-
-use crate::{api::outgo::FullVerdict, archive::ArchiveItem};
+use crate::{
+    api::outgo::{self, FullVerdict},
+    archive::ArchiveItem,
+};
 
 pub use {
     anyhow::{Error, Result, anyhow},
     env_logger,
+    serde::{Deserialize, Serialize},
 };
 
-use std::{str::FromStr, sync::Arc};
-use {tokio::sync::mpsc::unbounded_channel, ws::Uri};
+use {
+    std::{str::FromStr, sync::Arc},
+    tokio::{
+        io::{AsyncReadExt, stdin},
+        sync::mpsc::unbounded_channel,
+    },
+    uuid::Uuid,
+    ws::Uri,
+};
 
 struct App {
     pub ws: ws::Service,
@@ -113,43 +122,79 @@ impl App {
     }
 }
 
+async fn wait_any_key() -> Result<()> {
+    let mut _buf = vec![];
+    stdin().read_buf(&mut _buf).await?;
+    Ok(())
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    pub task_manager_host: Box<str>,
+    pub task_manager_uri: Box<str>,
+    pub invoker_config_dir: Box<str>,
+    pub invoker_work_dir: Box<str>,
+}
+
+impl Config {
+    pub async fn init() -> Result<Self> {
+        let config = envy::from_env::<Config>()?;
+        log::info!("enviroment variables: {config:#?}");
+        log::warn!(
+            "{} can be cleared. Press any key to continue ...",
+            config.invoker_work_dir
+        );
+        wait_any_key().await?;
+        Ok(config)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
+    let config = Config::init().await?;
 
-    let task_manager_host = std::env::var("TASK_MANAGER_HOST")
-        .expect("enviroment variable 'TASK_MANAGER_HOST' not found");
+    let judger_work_dir = format!("{}/judge", config.invoker_work_dir).into_boxed_str();
+    let token = Uuid::new_v4();
+    println!("invoker token: {token}");
 
-    let task_manager_uri = Uri::from_str(
-        std::env::var("TASK_MANAGER_WS_URI")
-            .expect("enviroment variable 'TASK_MANAGER_WS_URI' not found")
-            .as_str(),
-    )?;
+    let isolate_client = sandboxes::isolate::Service::new(&config.invoker_config_dir).await?;
 
-    let config_dir = std::env::var("INVOKER_CONFIG_DIR")
-        .expect("enviroment variable 'INVOKER_CONFIG_DIR' not found");
+    let ws_client = ws::Service::new(
+        config.task_manager_host.as_ref(),
+        Uri::from_str(config.task_manager_uri.as_ref())?,
+    )
+    .await?;
 
-    let work_dir = std::env::var("INVOKER_WORK_DIR")
-        .expect("enviroment variable 'INVOKER_WORK_DIR' not found");
-
-    log::info!("task manager uri: {task_manager_uri}");
-    log::info!("invoker work dir: {work_dir}");
-    log::warn!("{work_dir} can be cleared. Press any key to continue ...");
-
-    let mut _buf = vec![];
-    stdin().read_buf(&mut _buf).await?;
-
-    let ws_client = ws::Service::from_uri(task_manager_host, task_manager_uri).await?;
-    let isolate_client = sandboxes::isolate::Service::new(&config_dir).await?;
+    ws_client.send(api::outgo::Msg::Token(token)).await?;
 
     let app = App {
         ws: ws_client,
-        judger: Arc::new(
-            judge::Service::new(isolate_client, format!("{work_dir}/judge").into_boxed_str()).await,
-        ),
+        judger: Arc::new(judge::Service::new(isolate_client, judger_work_dir).await),
     };
 
-    Arc::new(app).run().await?;
+    let app = Arc::new(app);
+    let result = Arc::clone(&app).run().await;
+
+    match result {
+        Ok(_) => {
+            app.ws
+                .send(outgo::Msg::Exited {
+                    code: 0,
+                    data: Box::from(""),
+                })
+                .await?
+        }
+        Err(e) => {
+            log::error!("error: '{e}'");
+            app.ws
+                .send(outgo::Msg::Exited {
+                    code: 1,
+                    data: e.to_string().into_boxed_str(),
+                })
+                .await?
+        }
+    }
 
     Ok(())
 }
