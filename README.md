@@ -2,60 +2,69 @@
 ## Incoming
 ### Start task
 ```
-START
+TYPE START
+DATA
 <binary data: tar.gz: problem_template>
 ```
 ### Stop task
 ```
-STOP
+TYPE STOP
 ```
 ### Close invoker
 ```
-CLOSE
+TYPE CLOSE
 ```
 ## Outgoing
 ### Full verdict
 ```
+TYPE VERDICT
 VERDICT OK
 SUM <score>
 GROUPS <score group 0> <score group 1> ... <score group n>
 ```
 or
 ```
+TYPE VERDICT
 VERDICT CE
-<message>
+MESSAGE <message>
 ```
 or
 ```
+TYPE VERDICT
 VERDICT TE
-<message>
+MESSAGE <message>
 ```
 
 ### Test verdict
 ```
+TYPE TEST
 TEST <id>
 VERDICT <verdict>
 TIME <time>
 MEMORY <memory>
+DATA
 <data: tar.gz: (output, message)>
 ```
 ### Exited
 ```
+TYPE EXITED
 EXITED <exit code>
+DATA
 <exit data>
 ```
 ### Invoker error
 ```
-ERROR
-<error message>
+TYPE ERROR
+ERROR <error message>
 ```
 ### Operator error
 ```
-OPERROR
-<error message>
+TYPE OPERROR
+OPERROR <error message>
 ```
 ### Sending token
 ```
+TYPE TOKEN
 TOKEN <token: uuid>
 ```
 
