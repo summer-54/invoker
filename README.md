@@ -18,12 +18,7 @@ CLOSE
 ```
 VERDICT OK
 SUM <score>
-<score group 0>
-<score group 1>
-<score group 2>
-<score group 3>
-...
-<score group n>
+GROUPS <score group 0> <score group 1> ... <score group n>
 ```
 or
 ```

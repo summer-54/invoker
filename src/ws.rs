@@ -15,7 +15,6 @@ use {
         net::{TcpStream, ToSocketAddrs},
         sync::Mutex,
     },
-    uuid::Uuid,
 };
 
 pub struct Service {
@@ -59,10 +58,11 @@ impl Service {
                             score,
                             groups_score,
                         } => {
-                            let mut ws_msg = format!("VERDICT OK\nSUM {score}\n");
+                            let mut ws_msg = format!("VERDICT OK\nSUM {score}\nGROUPS");
                             for score in groups_score {
-                                ws_msg.push_str(&format!("{score}\n"));
+                                ws_msg.push_str(&format!(" {score}"));
                             }
+                            ws_msg.push('\n');
                             ws_msg
                         }
                         outgo::FullVerdict::Ce(msg) => {
