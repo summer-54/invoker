@@ -141,6 +141,8 @@ templates/problem_template
 └── solution
 ```
 
+## `config.yaml`
+### Template
 ``` yaml
 type: standart
 
@@ -169,6 +171,42 @@ groups:
   - id: 3
     range: [21, 30]
     cost: 50
-    depends: [1, 2]
-
+    depends:
 ```
+### Config
+
+| Field    | Type            | Description          |
+| -------- | --------------- | -------------------- |
+| `type`   | `ProblemType`   | Problem type         |
+| `lang`   | `Lang`          | Compiler name        |
+| `limits` | `ProblemLimits` | Limits for solutiuon |
+| `groups` | \[Group]        | Groups configs       |
+## `ProblemType`
+- `standart`
+## `Lang`
+- `g++`
+## `ProblemLimits`
+
+| Field       | Type    | Description             |
+| ----------- | ------- | ----------------------- |
+| `time`      | `f64`   | Time limit \[seconds]   |
+| `real_time` | `f64`   | Real limit \[seconds]   |
+| `memory`    | `usize` | Memory size limit \[Kb] |
+| `stack`     | `usize` | Stack size limit \[Kb]  |
+
+## `Group`
+
+| Field     | Type          | Description                                                        |
+| --------- | ------------- | ------------------------------------------------------------------ |
+| `id`      | `GroupId`     | Time limit \[seconds]                                              |
+| `range`   | `[TestId; 2]` | Range tests in this group \[two numbers: \[first, last] inclusive] |
+| `cost`    | `usize`       | Cost of group (0 .. 100)                                           |
+| `depends` | `[GroupId]`   | List depends groups                                                |
+
+### `GroupId`
+`usize`
+Numbering starts from __zero__!!!
+
+### `TestId`
+`usize`
+Numbering starts with __one__!!!
