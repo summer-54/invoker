@@ -171,7 +171,7 @@ groups:
   - id: 3
     range: [21, 30]
     cost: 50
-    depends:
+    depends: []
 ```
 ### Config
 
