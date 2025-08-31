@@ -26,7 +26,7 @@ impl<T: Copy> Default for MaybeLimited<T> {
 pub struct IsolateConfig {
     sandboxes_count: usize,
 
-    proccess_default_limit: MaybeLimited<usize>,
+    process_default_limit: MaybeLimited<usize>,
     stack_default_limit: MaybeLimited<usize>,
     extra_time_default_limit: f64,
     open_files_default_limit: MaybeLimited<usize>,
@@ -37,7 +37,6 @@ pub struct IsolateConfig {
     cg_root: Box<str>,
     first_uid: usize,
     first_gid: usize,
-    num_boxes: usize,
 
     restricted_init: bool,
 }
@@ -47,16 +46,15 @@ const CONFIG_NAME: &str = "isolate.yaml";
 impl Default for IsolateConfig {
     fn default() -> Self {
         Self {
-            sandboxes_count: 1,
+            sandboxes_count: 1000,
             box_root: "/.invoker/isolate".to_string().into_boxed_str(),
             lock_root: "/run/isolate/locks".to_string().into_boxed_str(),
             cg_root: "/run/isolate/cgroup".to_string().into_boxed_str(),
             first_uid: 60000,
             first_gid: 60000,
-            num_boxes: 1000,
             restricted_init: false,
 
-            proccess_default_limit: Limited(1),
+            process_default_limit: Limited(1),
             extra_time_default_limit: 0.,
             open_files_default_limit: Limited(2),
             stack_default_limit: Unlimited,
@@ -100,7 +98,7 @@ impl IsolateConfig {
                     this.cg_root,
                     this.first_uid,
                     this.first_gid,
-                    this.num_boxes,
+                    this.sandboxes_count,
                     this.restricted_init
                 )
                 .as_bytes(),
@@ -186,7 +184,7 @@ pub struct RunConfig {
     pub extra_time_limit: Option<f64>,   // Extra time limit (in seconds)
     pub stack_limit: Option<MaybeLimited<usize>>, // Stack limit (in KiB)
     pub open_files_limit: Option<MaybeLimited<usize>>,
-    pub proccess_limit: Option<MaybeLimited<usize>>,
+    pub process_limit: Option<MaybeLimited<usize>>,
 }
 
 impl Default for RunConfig {
@@ -198,7 +196,7 @@ impl Default for RunConfig {
             extra_time_limit: Default::default(),
             stack_limit: Default::default(),
             open_files_limit: Default::default(),
-            proccess_limit: Default::default(),
+            process_limit: Default::default(),
         }
     }
 }
@@ -292,11 +290,11 @@ impl Sandbox {
         {
             command.arg(format!("--open_files_limit={}", open_files_limit));
         }
-        if let Limited(proccess_limit) = cfg
-            .proccess_limit
-            .unwrap_or(self.service.config.proccess_default_limit)
+        if let Limited(process_limit) = cfg
+            .process_limit
+            .unwrap_or(self.service.config.process_default_limit)
         {
-            command.arg(format!("--proccess_limit={}", proccess_limit));
+            command.arg(format!("--process_limit={}", process_limit));
         }
 
         log::info!(
@@ -359,4 +357,12 @@ impl Sandbox {
     pub async fn read_from_box(&self, from: &str) -> Result<File> {
         Ok(tokio::fs::File::open(format!("{}/{from}", self.inner_dir())).await?)
     }
+}
+
+#[tokio::test]
+pub async fn default_isolate_config() {
+    panic!(
+        "{}",
+        serde_yml::to_string(&IsolateConfig::default()).unwrap()
+    );
 }

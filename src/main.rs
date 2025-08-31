@@ -18,10 +18,7 @@ pub use {
 
 use {
     std::{str::FromStr, sync::Arc},
-    tokio::{
-        io::{AsyncReadExt, stdin},
-        sync::mpsc::unbounded_channel,
-    },
+    tokio::sync::mpsc::unbounded_channel,
     uuid::Uuid,
     ws::Uri,
 };
@@ -122,29 +119,17 @@ impl App {
     }
 }
 
-async fn wait_any_key() -> Result<()> {
-    let mut _buf = vec![];
-    stdin().read_buf(&mut _buf).await?;
-    Ok(())
-}
-
 #[derive(Deserialize, Debug)]
 struct Config {
-    pub task_manager_host: Box<str>,
-    pub task_manager_uri: Box<str>,
-    pub invoker_config_dir: Box<str>,
-    pub invoker_work_dir: Box<str>,
+    pub manager_host: Box<str>,
+    pub config_dir: Box<str>,
+    pub work_dir: Box<str>,
 }
 
 impl Config {
     pub async fn init() -> Result<Self> {
-        let config = envy::from_env::<Config>()?;
+        let config = envy::prefixed("INVOKER_").from_env::<Config>()?;
         log::info!("enviroment variables: {config:#?}");
-        log::warn!(
-            "{} can be cleared. Press any key to continue ...",
-            config.invoker_work_dir
-        );
-        wait_any_key().await?;
         Ok(config)
     }
 }
@@ -154,15 +139,15 @@ async fn main() -> Result<()> {
     env_logger::init();
     let config = Config::init().await?;
 
-    let judger_work_dir = format!("{}/judge", config.invoker_work_dir).into_boxed_str();
+    let judger_work_dir = format!("{}/judge", config.work_dir).into_boxed_str();
     let token = Uuid::new_v4();
     println!("invoker token: {token}");
 
-    let isolate_client = sandboxes::isolate::Service::new(&config.invoker_config_dir).await?;
+    let isolate_client = sandboxes::isolate::Service::new(&config.config_dir).await?;
 
     let ws_client = ws::Service::new(
-        config.task_manager_host.as_ref(),
-        Uri::from_str(config.task_manager_uri.as_ref())?,
+        config.manager_host.as_ref(),
+        Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
     )
     .await?;
 

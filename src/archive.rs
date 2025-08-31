@@ -54,6 +54,5 @@ async fn decompression() {
     let f = tokio::fs::File::open("test1.tar").await.unwrap();
     let mut buf = BufReader::new(f);
     let mut arc = decompress::<&mut BufReader<tokio::fs::File>>(&mut buf).await;
-    dbg!(&arc);
     arc.unpack("tests").await.unwrap();
 }

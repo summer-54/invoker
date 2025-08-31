@@ -182,7 +182,7 @@ impl Service {
                             extra_time_limit: None,
                             stack_limit: Some(MaybeLimited::Limited(limits.stack)),
                             open_files_limit: None,
-                            proccess_limit: None,
+                            process_limit: None,
                         },
                     )
                     .await
@@ -233,7 +233,7 @@ impl Service {
                             extra_time_limit: None,
                             stack_limit: Some(MaybeLimited::Unlimited),
                             open_files_limit: Some(MaybeLimited::Unlimited),
-                            proccess_limit: None,
+                            process_limit: None,
                         },
                     )
                     .await
@@ -442,6 +442,4 @@ async fn parsing() {
         .await
         .unwrap();
     let problem_config: ProblemConfig = serde_yml::from_str(text.as_str()).unwrap();
-
-    dbg!("{:#?}", problem_config);
 }

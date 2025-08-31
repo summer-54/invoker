@@ -1,6 +1,52 @@
-# Invoker
+# Configs
+## `isolate.yaml`
+
+Config for sandbox manager
+
+### Default limits
+
+| Field                      | Type                  | Description                                                     |
+| -------------------------- | --------------------- | --------------------------------------------------------------- |
+| `process_default_limit`    | `MaybeLimited<usize>` | Default process limit sandbox                                   |
+| `stack_default_limit`      | `MaybeLimited<usize>` | Default stack size limit sandbox [Kb]                           |
+| `extra_time_default_limit` | `f64`                 | Default extra time limit sandbox (after exceeding `time_limit`) |
+| `open_files_default_limit` | `MaybeLimited<usize>` | Default limit number opened files                               |
+### `ISOLATE` rules
+
+| Field             | Type    | Description                                                                                                         | Default               |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `sandboxes_count` | `usize` | Maximum number of containers                                                                                        | `1`                   |
+| `box_root`        | `str`   | All sandboxes are created under this directory. This directory and all its ancestors must be writeable only to root | `/.invoker/isolate`   |
+| `lock_root`       | `str`   | Directory where lock files are created                                                                              | `/run/isolate/locks`  |
+| `cg_root`         | `str`   | -                                                                                                                   | `/run/isolate/cgroup` |
+| `first_uid`       | `usize` | First `user_id` reserved for sandboxes                                                                              | `60000`               |
+| `first_gid`       | `usize` | First `group_id` reserved for sandbox                                                                               | `60000`               |
+| `restricted_init` | `bool`  | Only root can create new sandboxes                                                                                  | `false`               |
+``` yaml
+sandboxes_count: 1000
+process_default_limit: !Limited 1
+stack_default_limit: Unlimited
+extra_time_default_limit: 0.0
+open_files_default_limit: !Limited 2
+box_root: /.invoker/isolate
+lock_root: /run/isolate/locks
+cg_root: /run/isolate/cgroup
+first_uid: 60000
+first_gid: 60000
+restricted_init: false
+```
+# Enviroment variables
+
+- `INVOKER_MANAGER_HOST: SocketAddr` for example  `127.0.0.1:5477`
+- `INVOKER_CONFIG_DIR: DirPath` for example `.config/invoker`
+- `INVOKER_WORK_DIR: DirPath`  for example `invoker`
+# Api
 ## Incoming
-### Start task
+
+### Websocket client at `ws://$INVOKER_MANAGER_HOST`
+
+
+#### Start task
 ```
 TYPE START
 DATA
@@ -68,11 +114,61 @@ ID <token: uuid>
 ```
 
 ## Verdicts:
- - OK  //ok
- - WA, //wrong answer
- - ML, //memory limit
- - TL, //time limit
- - RE, //runtime error
- - CE, //compile error
- - TE, //testing system error
- - SL, //stack limit
+
+| Name | Descryption           | Is success |
+| ---- | --------------------- | ---------- |
+| OK   | ok                    | yes        |
+| WA   | wrong answer          | no         |
+| TL   | time limit exceeded   | no         |
+| ML   | memory limit exceeded | no         |
+| SL   | stack limit exeeded   | no         |
+| RE   | runtime error         | no         |
+| CE   | compile error         | no         |
+| TE   | testing system error  | no         |
+# Problems
+``` files
+templates/problem_template
+├── config.yaml
+├── checker.out
+├── correct
+│   ├── 1.txt
+│   │   ...
+│   └── n.txt
+├── [OPTION] intput
+│   ├── 1.txt
+│   │   ...
+│   └── n.txt
+└── solution
+```
+
+``` yaml
+type: standart
+
+lang: g++
+
+limits:
+  time: 2000
+  real_time: 2000
+  memory: 512000
+
+  stack: 512000 #optionally
+
+groups:
+  - id: 0
+    range: [1, 2]
+    cost: 0
+    depends: []
+  - id: 1
+    range: [3, 10]
+    cost: 30
+    depends: []
+  - id: 2
+    range: [11, 20]
+    cost: 20
+    depends: [1]
+  - id: 3
+    range: [21, 30]
+    cost: 50
+    depends: [1, 2]
+
+```
