@@ -110,9 +110,7 @@ impl Verdict {
             isolate::RunStatus::Sg(_) => Self::Re,
         })
     }
-}
 
-impl Verdict {
     pub fn is_success(&self) -> bool {
         *self == Verdict::Ok
     }

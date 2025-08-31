@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     Result,
     api::{income, outgo},
@@ -16,6 +18,46 @@ use {
         sync::Mutex,
     },
 };
+
+fn deserialize_msg(mut buf: &[u8]) -> (HashMap<Box<str>, Box<str>>, Option<Box<[u8]>>) {
+    let mut map = HashMap::<Box<str>, Box<str>>::new();
+
+    let data = loop {
+        let Some(endl_pos) = buf.iter().position(|&b| b == ('\n' as u8)) else {
+            break None;
+        };
+        let (line, other) = buf.split_at(endl_pos + 1);
+        buf = other;
+
+        let line = String::from_utf8_lossy(line);
+        let (key, value) = line.split_once(' ').unwrap_or((&*line, ""));
+        let key = key.trim();
+        let value = value.trim();
+
+        if key == "DATA" {
+            break Some(buf.into());
+        } else {
+            map.insert(key.into(), value.into());
+        }
+    };
+
+    (map, data)
+}
+
+fn serialize_msg(
+    iter: impl std::iter::Iterator<Item = (Box<str>, Box<str>)>,
+    data: Option<Box<[u8]>>,
+) -> Box<[u8]> {
+    let mut buf = vec![];
+    for (k, v) in iter {
+        buf.append(&mut format!("{k} {v}\n").as_bytes().to_vec());
+    }
+    if let Some(data) = data {
+        buf.append(&mut "DATA\n".as_bytes().to_vec());
+        buf.append(&mut data.to_vec());
+    }
+    buf.into_boxed_slice()
+}
 
 pub struct Service {
     read: Mutex<Receiver<TcpStream, DeflateDecoder>>,
@@ -52,71 +94,99 @@ impl Service {
             .lock()
             .await
             .write(
-                match msg {
-                    outgo::Msg::FullVerdict(verdict) => match verdict {
-                        outgo::FullVerdict::Ok {
-                            score,
-                            groups_score,
-                        } => {
-                            let mut ws_msg = format!("VERDICT OK\nSUM {score}\nGROUPS");
-                            for score in groups_score {
-                                ws_msg.push_str(&format!(" {score}"));
+                {
+                    let mut map = Vec::<(Box<str>, Box<str>)>::new();
+                    let mut msg_data = None;
+                    match msg {
+                        outgo::Msg::FullVerdict(verdict) => {
+                            map.push(("TYPE".into(), "VERDICT".into()));
+                            match verdict {
+                                outgo::FullVerdict::Ok {
+                                    score,
+                                    groups_score,
+                                } => {
+                                    map.push(("VERDICT".into(), "OK".into()));
+                                    map.push(("SUM".into(), format!("{score}").into()));
+                                    map.push((
+                                        "GROUPS".into(),
+                                        String::from_utf8_lossy(
+                                            &*groups_score
+                                                .into_iter()
+                                                .flat_map(|score| format!("{score} ").into_bytes())
+                                                .collect::<Vec<u8>>(),
+                                        )
+                                        .into(),
+                                    ));
+                                }
+                                outgo::FullVerdict::Ce(msg) => {
+                                    map.push(("VERDICT".into(), "CE".into()));
+                                    map.push(("MESSAGE".into(), msg));
+                                }
+                                outgo::FullVerdict::Te(msg) => {
+                                    map.push(("VERDICT".into(), "CE".into()));
+                                    map.push(("MESSAGE".into(), msg));
+                                }
                             }
-                            ws_msg.push('\n');
-                            ws_msg
                         }
-                        outgo::FullVerdict::Ce(msg) => {
-                            format!("VERDICT CE\n {msg}\n")
+                        outgo::Msg::TestVerdict {
+                            test_id,
+                            verdict,
+                            time,
+                            memory,
+                            data,
+                        } => {
+                            map.push(("TYPE".into(), "TEST".into()));
+                            map.push(("ID".into(), format!("{test_id}").into()));
+                            map.push(("VERDICT".into(), format!("{verdict}").into()));
+                            map.push(("TIME".into(), format!("{time}").into()));
+                            map.push(("MEMORY".into(), format!("{memory}").into()));
+                            msg_data = Some(data);
                         }
-                        outgo::FullVerdict::Te(msg) => {
-                            format!("VERDICT CE\n {msg}\n")
+                        outgo::Msg::Exited { code, data } => {
+                            map.push(("TYPE".into(), "EXITED".into()));
+                            map.push(("CODE".into(), format!("{code}").into()));
+                            map.push(("MESSAGE".into(), data));
+                        }
+                        outgo::Msg::Error { msg } => {
+                            map.push(("TYPE".into(), "ERROR".into()));
+                            map.push(("MESSAGE".into(), msg));
+                        }
+                        outgo::Msg::OpError { msg } => {
+                            map.push(("TYPE".into(), "OPERROR".into()));
+                            map.push(("MESSAGE".into(), msg));
+                        }
+                        outgo::Msg::Token(token) => {
+                            map.push(("TYPE".into(), "TOKEN".into()));
+                            map.push(("ID".into(), format!("{}", token.as_u128()).into()));
                         }
                     }
-                    .into_bytes(),
-                    outgo::Msg::TestVerdict {
-                        test_id,
-                        verdict,
-                        time,
-                        memory,
-                        data,
-                    } => {
-                        let mut bin_msg = format!(
-                            "TEST {test_id}\nVERDICT {verdict}\nTIME {time}\nMEMORY {memory}\n"
-                        )
-                        .into_bytes();
-                        bin_msg.append(&mut data.into_vec());
-                        bin_msg
-                    }
-                    outgo::Msg::Exited { code, data } => {
-                        format!("EXITED {code}\n{}\n", data).into_bytes()
-                    }
-                    outgo::Msg::Error { msg } => format!("ERROR\n{msg}\n").into_bytes(),
-                    outgo::Msg::OpError { msg } => format!("OPERROR\n{msg}\n").into_bytes(),
-                    outgo::Msg::Token(token) => {
-                        format!("TOKEN\n{}\n", token.as_u128()).into_bytes()
-                    }
+                    serialize_msg(map.into_iter(), msg_data)
                 },
                 ratchet_rs::PayloadType::Binary,
             )
             .await?;
         Ok(())
     }
+
     pub async fn recv(&self) -> Result<income::Msg> {
         loop {
-            let mut data = bytes::BytesMut::new();
-            self.read.lock().await.read(&mut data).await?;
+            let mut msg = bytes::BytesMut::new();
+            self.read.lock().await.read(&mut msg).await?;
 
-            let Some(pos) = data.iter().position(|&b| b == ('\n' as u8)) else {
+            let (map, data) = deserialize_msg(&*msg);
+            let Some(msg_type) = map.get("TYPE") else {
+                log::error!("field 'TYPE' not found");
                 continue;
             };
 
-            let (command, data) = data.split_at(pos + 1);
-            let command = String::from_utf8_lossy(command);
-
-            let msg = match command.trim() {
-                "START" => income::Msg::Start {
-                    data: Box::from(data),
-                },
+            let msg = match &**msg_type {
+                "START" => {
+                    let Some(data) = data else {
+                        log::error!("data not found");
+                        continue;
+                    };
+                    income::Msg::Start { data }
+                }
                 "STOP" => income::Msg::Stop,
                 "CLOSE" => income::Msg::Close,
                 command => {

@@ -4,7 +4,7 @@
 ```
 TYPE START
 DATA
-<binary data: tar.gz: problem_template>
+<binary data: tar: problem_template>
 ```
 ### Stop task
 ```
@@ -43,14 +43,13 @@ VERDICT <verdict>
 TIME <time>
 MEMORY <memory>
 DATA
-<data: tar.gz: (output, message)>
+<data: tar: (output, message)>
 ```
 ### Exited
 ```
 TYPE EXITED
 CODE <exit code>
-DATA
-<exit data>
+MESSAGE <exit data>
 ```
 ### Invoker error
 ```
