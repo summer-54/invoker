@@ -18,27 +18,27 @@ TYPE CLOSE
 ### Full verdict
 ```
 TYPE VERDICT
-VERDICT OK
+NAME OK
 SUM <score>
 GROUPS <score group 0> <score group 1> ... <score group n>
 ```
 or
 ```
 TYPE VERDICT
-VERDICT CE
+NAME CE
 MESSAGE <message>
 ```
 or
 ```
 TYPE VERDICT
-VERDICT TE
+NAME TE
 MESSAGE <message>
 ```
 
 ### Test verdict
 ```
 TYPE TEST
-TEST <id>
+ID <id>
 VERDICT <verdict>
 TIME <time>
 MEMORY <memory>
@@ -48,24 +48,24 @@ DATA
 ### Exited
 ```
 TYPE EXITED
-EXITED <exit code>
+CODE <exit code>
 DATA
 <exit data>
 ```
 ### Invoker error
 ```
 TYPE ERROR
-ERROR <error message>
+MESSAGE <error message>
 ```
 ### Operator error
 ```
 TYPE OPERROR
-OPERROR <error message>
+MESSAGE <error message>
 ```
 ### Sending token
 ```
 TYPE TOKEN
-TOKEN <token: uuid>
+ID <token: uuid>
 ```
 
 ## Verdicts:
