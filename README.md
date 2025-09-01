@@ -40,6 +40,7 @@ restricted_init: false
 - `INVOKER_MANAGER_HOST: SocketAddr` for example  `127.0.0.1:5477`
 - `INVOKER_CONFIG_DIR: DirPath` for example `.config/invoker`
 - `INVOKER_WORK_DIR: DirPath`  for example `invoker`
+- `INVOKER_ISOLATE_EXE_PATH: Path`  for example `.local/bin/isolate`
 # Api
 ## Incoming
 

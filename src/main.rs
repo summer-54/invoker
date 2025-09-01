@@ -124,6 +124,8 @@ struct Config {
     pub manager_host: Box<str>,
     pub config_dir: Box<str>,
     pub work_dir: Box<str>,
+
+    pub isolate_exe_path: Box<str>,
 }
 
 impl Config {
@@ -143,7 +145,8 @@ async fn main() -> Result<()> {
     let token = Uuid::new_v4();
     println!("invoker token: {token}");
 
-    let isolate_client = sandboxes::isolate::Service::new(&config.config_dir).await?;
+    let isolate_client =
+        sandboxes::isolate::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
     let ws_client = ws::Service::new(
         config.manager_host.as_ref(),

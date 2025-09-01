@@ -116,13 +116,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub async fn new(config_dir: &str) -> Result<Arc<Service>> {
-        let path = std::env::var("ISOLATE_PATH")
-            .expect("enviroment variable 'ISOLATE_PATH' not found")
-            .into_boxed_str();
-
-        // todo!("checking existing isolate");
-
+    pub async fn new(config_dir: &str, path: Box<str>) -> Result<Arc<Service>> {
         if !Command::new(&*path)
             .arg("--version")
             .status()
