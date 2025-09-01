@@ -120,6 +120,7 @@ impl App {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "UPPERCASE")]
 struct Config {
     pub manager_host: Box<str>,
     pub config_dir: Box<str>,
