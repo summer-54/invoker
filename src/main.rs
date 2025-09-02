@@ -29,85 +29,85 @@ struct App {
 }
 
 impl App {
+    fn start_judging(self: &Arc<Self>, data: Box<[u8]>) {
+        let self_clone = Arc::clone(&self);
+        let (sender, mut receiver) = unbounded_channel::<(usize, judge::TestResult)>();
+        let handler = tokio::spawn(async move {
+            while let Some((id, test_result)) = receiver.recv().await {
+                let data = archive::compress(&[
+                    ArchiveItem {
+                        path: "output",
+                        data: test_result.output.as_bytes(),
+                    },
+                    ArchiveItem {
+                        path: "message",
+                        data: test_result.message.as_bytes(),
+                    },
+                ])
+                .await
+                .unwrap_or_else(|e| {
+                    log::error!("sennding 'TestVerdict': compression error: {e}");
+                    vec![].into_boxed_slice()
+                });
+                self_clone
+                    .ws
+                    .send(api::outgo::Msg::TestVerdict {
+                        test_id: id,
+                        verdict: test_result.verdict,
+                        time: test_result.time,
+                        memory: test_result.memory,
+                        data,
+                    })
+                    .await
+                    .expect("webscoket isn't working unexpexted");
+            }
+        });
+        let self_clone = Arc::clone(&self);
+
+        tokio::spawn(async move {
+            let package = archive::decompress(&*data).await;
+            let result = Arc::clone(&self_clone.judger).judge(package, sender).await;
+            _ = handler.await;
+            match result {
+                Ok(full_verdict) => self_clone
+                    .ws
+                    .send(api::outgo::Msg::FullVerdict(match full_verdict {
+                        judge::FullResult::Ok {
+                            score,
+                            groups_score,
+                        } => FullVerdict::Ok {
+                            score,
+                            groups_score,
+                        },
+                        judge::FullResult::Ce(msg) => FullVerdict::Ce(msg),
+                        judge::FullResult::Te(msg) => FullVerdict::Te(msg),
+                    }))
+                    .await
+                    .map_err(|e| {
+                        log::error!("sending message error: {e:?}");
+                    })
+                    .expect("message sending error"),
+                Err(error) => {
+                    log::error!("judger error: {error}");
+                    self_clone
+                        .ws
+                        .send(api::outgo::Msg::Error {
+                            msg: error.to_string().into_boxed_str(),
+                        })
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+    }
+
     pub async fn run(self: Arc<Self>) -> Result<()> {
         tokio::spawn(async move {
             loop {
                 log::info!("waiting for message...");
                 let msg = self.ws.recv().await?;
                 match msg {
-                    api::income::Msg::Start { data } => {
-                        let self_clone = Arc::clone(&self);
-                        let (sender, mut receiver) =
-                            unbounded_channel::<(usize, judge::TestResult)>();
-                        let handler = tokio::spawn(async move {
-                            while let Some((id, test_result)) = receiver.recv().await {
-                                let data = archive::compress(&[
-                                    ArchiveItem {
-                                        path: "output",
-                                        data: test_result.output.as_bytes(),
-                                    },
-                                    ArchiveItem {
-                                        path: "message",
-                                        data: test_result.message.as_bytes(),
-                                    },
-                                ])
-                                .await
-                                .unwrap_or_else(|e| {
-                                    log::error!("sennding 'TestVerdict': compression error: {e}");
-                                    vec![].into_boxed_slice()
-                                });
-                                self_clone
-                                    .ws
-                                    .send(api::outgo::Msg::TestVerdict {
-                                        test_id: id,
-                                        verdict: test_result.verdict,
-                                        time: test_result.time,
-                                        memory: test_result.memory,
-                                        data,
-                                    })
-                                    .await
-                                    .expect("webscoket isn't working unexpexted");
-                            }
-                        });
-                        let self_clone = Arc::clone(&self);
-
-                        tokio::spawn(async move {
-                            let package = archive::decompress(&*data).await;
-                            let result =
-                                Arc::clone(&self_clone.judger).judge(package, sender).await;
-                            _ = handler.await;
-                            match result {
-                                Ok(full_verdict) => self_clone
-                                    .ws
-                                    .send(api::outgo::Msg::FullVerdict(match full_verdict {
-                                        judge::FullResult::Ok {
-                                            score,
-                                            groups_score,
-                                        } => FullVerdict::Ok {
-                                            score,
-                                            groups_score,
-                                        },
-                                        judge::FullResult::Ce(msg) => FullVerdict::Ce(msg),
-                                        judge::FullResult::Te(msg) => FullVerdict::Te(msg),
-                                    }))
-                                    .await
-                                    .map_err(|e| {
-                                        log::error!("sending message error: {e:?}");
-                                    })
-                                    .expect("message sending error"),
-                                Err(error) => {
-                                    log::error!("judger error: {error}");
-                                    self_clone
-                                        .ws
-                                        .send(api::outgo::Msg::Error {
-                                            msg: error.to_string().into_boxed_str(),
-                                        })
-                                        .await
-                                        .unwrap();
-                                }
-                            }
-                        });
-                    }
+                    api::income::Msg::Start { data } => self.start_judging(data),
                     api::income::Msg::Stop => self.judger.stop_all().await?,
                     api::income::Msg::Close => break,
                 }
@@ -120,7 +120,6 @@ impl App {
 }
 
 #[derive(Deserialize, Debug)]
-#[serde(rename_all = "UPPERCASE")]
 struct Config {
     pub manager_host: Box<str>,
     pub config_dir: Box<str>,
@@ -163,7 +162,9 @@ async fn main() -> Result<()> {
     };
 
     let app = Arc::new(app);
-    let result = Arc::clone(&app).run().await;
+    let result = Arc::clone(&app).run();
+    app.start_judging(tokio::fs::read("problem.tar").await?.into_boxed_slice());
+    let result = result.await;
 
     match result {
         Ok(_) => {

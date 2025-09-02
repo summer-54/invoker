@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use tokio::io::AsyncRead;
 
@@ -43,6 +43,7 @@ pub struct IsolateConfig {
 
 const ISOLATE_CONFIG_PATH: &str = "/usr/local/etc/isolate";
 const CONFIG_NAME: &str = "isolate.yaml";
+
 impl Default for IsolateConfig {
     fn default() -> Self {
         Self {
@@ -84,22 +85,18 @@ impl IsolateConfig {
         isolate_config_file
             .write_all(
                 format!(
-                    "
-                    box_root={}\n
-                    lock_root={}\n
-                    cg_root={}\n
-                    first_uid={}\n
-                    first_gid={}\n
-                    num_boxes={}\n
-                    resistance_init={}\n
-                    ",
+                    "box_root={}\nlock_root={}\ncg_root={}\nfirst_uid={}\nfirst_gid={}\nnum_boxes={}\nrestricted_init={}\n",
                     this.box_root,
                     this.lock_root,
                     this.cg_root,
                     this.first_uid,
                     this.first_gid,
                     this.sandboxes_count,
-                    this.restricted_init
+                    if this.restricted_init {
+                        1
+                    } else {
+                        0
+                    }
                 )
                 .as_bytes(),
             )
@@ -179,6 +176,11 @@ pub struct RunConfig {
     pub stack_limit: Option<MaybeLimited<usize>>, // Stack limit (in KiB)
     pub open_files_limit: Option<MaybeLimited<usize>>,
     pub process_limit: Option<MaybeLimited<usize>>,
+    pub env: bool,
+
+    pub stdin: Option<Box<str>>,
+    pub stdout: Option<Box<str>>,
+    pub stderr: Option<Box<str>>,
 }
 
 impl Default for RunConfig {
@@ -191,6 +193,11 @@ impl Default for RunConfig {
             stack_limit: Default::default(),
             open_files_limit: Default::default(),
             process_limit: Default::default(),
+            env: false,
+
+            stdin: Default::default(),
+            stdout: Default::default(),
+            stderr: Default::default(),
         }
     }
 }
@@ -230,12 +237,21 @@ impl Drop for Sandbox {
     }
 }
 
+fn parse_meta_file(s: &str) -> HashMap<Box<str>, Box<str>> {
+    s.split("\n")
+        .filter_map(|s| {
+            s.split_once(':')
+                .map(|(k, v)| (Box::from(k.trim()), Box::from(v.trim())))
+        })
+        .collect::<HashMap<Box<str>, Box<str>>>()
+}
+
 impl Sandbox {
     pub fn id(&self) -> usize {
         self.id
     }
     fn inner_dir(&self) -> Box<str> {
-        format!("{}/{}/box", self.service.config.lock_root, self.id).into_boxed_str()
+        format!("{}/{}/box", self.service.config.box_root, self.id).into_boxed_str()
     }
 
     pub async fn run(&self, target_command: Box<str>, cfg: RunConfig) -> Result<RunResult> {
@@ -243,21 +259,27 @@ impl Sandbox {
 
         let mut command = Command::new(&*self.service.path);
         command
-            .arg("--run")
-            .arg(format!("\"{target_command}\""))
             .arg(format!("--box-id={}", self.id))
             .arg(format!("--meta={meta_path}"));
 
-        // DEPRECATED (use <command> < input_path > output_path)
-        // if let Some(input_path) = input_path {
-        //     command.arg(format!("--stdin={}", input_path));
-        // }
-        // if let Some(output_path) = output_path {
-        //     command.arg(format!("--stdout={}", output_path));
-        // }
-        // if let Some(error_path) = error_path {
-        //     command.arg(format!("--stderr={}", error_path));
-        // }
+        if let Some(input_path) = cfg.stdin {
+            let path = format!("{}/{}", self.inner_dir(), input_path);
+            tokio::fs::File::create(path.clone()).await?;
+            log::trace!("file: {path} created");
+            command.arg(format!("--stdin={input_path}"));
+        }
+        if let Some(output_path) = cfg.stdout {
+            let path = format!("{}/{}", self.inner_dir(), output_path);
+            tokio::fs::File::create(path.clone()).await?;
+            log::trace!("file: {path} created");
+            command.arg(format!("--stdout={output_path}"));
+        }
+        if let Some(error_path) = cfg.stderr {
+            let path = format!("{}/{}", self.inner_dir(), error_path);
+            tokio::fs::File::create(path.clone()).await?;
+            log::trace!("file: {path} created");
+            command.arg(format!("--stderr={error_path}"));
+        }
 
         if let Limited(time_limit) = cfg.time_limit {
             command.arg(format!("--time={}", time_limit));
@@ -282,14 +304,25 @@ impl Sandbox {
             .open_files_limit
             .unwrap_or(self.service.config.open_files_default_limit)
         {
-            command.arg(format!("--open_files_limit={}", open_files_limit));
+            command.arg(format!("--open-files={}", open_files_limit));
         }
         if let Limited(process_limit) = cfg
             .process_limit
             .unwrap_or(self.service.config.process_default_limit)
         {
-            command.arg(format!("--process_limit={}", process_limit));
+            command.arg(format!("--processes={}", process_limit));
+        } else {
+            command.arg(format!("--processes"));
         }
+
+        if cfg.env {
+            command.arg(format!("--full-env"));
+        }
+
+        command
+            .arg("--run")
+            .arg("--")
+            .args(target_command.to_string().split_ascii_whitespace());
 
         log::info!(
             "'{command:?}' executing in isolate/sanbox <id: {}>",
@@ -298,15 +331,9 @@ impl Sandbox {
 
         _ = command.status().await?;
 
-        let meta = tokio::fs::read_to_string(meta_path)
-            .await?
-            .split("\n")
-            .map(|s| {
-                s.split_once(':')
-                    .map(|(k, v)| (Box::from(k.trim()), Box::from(v.trim())))
-            })
-            .collect::<Option<HashMap<Box<str>, Box<str>>>>()
-            .ok_or(anyhow!("incorrect meta file (so strange)"))?;
+        let meta = tokio::fs::read_to_string(meta_path).await?;
+        log::trace!("meta file: {meta}");
+        let meta = parse_meta_file(&meta);
 
         let result = RunResult {
             status: if let Some(status) = meta.get("status") {
@@ -326,7 +353,7 @@ impl Sandbox {
             real_time: meta["time-wall"].parse()?,
             status_message: meta.get("message").cloned(),
             memory: meta["max-rss"].parse()?,
-            killed: meta["killed"].parse::<u8>()? == 1,
+            killed: meta.get("killed").map(|s| &**s).unwrap_or("0") == "1",
         };
 
         log::info!("run result: {result:?}");
@@ -339,16 +366,18 @@ impl Sandbox {
         from: &mut R,
         to: &str,
     ) -> Result<()> {
-        _ = tokio::io::copy(
-            from,
-            &mut File::create(format!("{}/{to}", self.inner_dir())).await?,
-        )
+        _ = tokio::io::copy(from, &mut {
+            let file = File::create(format!("{}/{to}", self.inner_dir())).await?;
+            file.set_permissions(Permissions::from_mode(0o777)).await?;
+            file
+        })
         .await?;
-        log::info!("file '{to}' in box box_id was writed");
+        log::info!("file '{to}' {}/{to} was created", self.inner_dir());
         Ok(())
     }
 
     pub async fn read_from_box(&self, from: &str) -> Result<File> {
+        log::trace!("read_from_box: {}/{from}", self.inner_dir());
         Ok(tokio::fs::File::open(format!("{}/{from}", self.inner_dir())).await?)
     }
 }
@@ -359,4 +388,27 @@ pub async fn default_isolate_config() {
         "{}",
         serde_yml::to_string(&IsolateConfig::default()).unwrap()
     );
+}
+
+#[tokio::test]
+async fn meta_file_parsing() {
+    let meta = "time:0.185
+time-wall:0.331
+max-rss:254360
+csw-voluntary:6
+csw-forced:5
+exitsig:11
+status:SG
+message:Caught fatal signal 11
+"
+    .split("\n")
+    .filter_map(|s| {
+        s.split_once(':')
+            .map(|(k, v)| (Box::from(k.trim()), Box::from(v.trim())))
+    })
+    .collect::<Vec<(Box<str>, Box<str>)>>();
+    // .ok_or(anyhow!("incorrect meta file (so strange)"))
+    // .unwrap();
+
+    panic!("{meta:?}");
 }

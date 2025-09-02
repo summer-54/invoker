@@ -128,14 +128,14 @@ ID <token: uuid>
 | TE   | testing system error  | no         |
 # Problems
 ``` files
-templates/problem_template
+problem_template
 ├── config.yaml
 ├── checker.out
 ├── correct
 │   ├── 1.txt
 │   │   ...
 │   └── n.txt
-├── [OPTION] intput
+├── [OPTION] input
 │   ├── 1.txt
 │   │   ...
 │   └── n.txt

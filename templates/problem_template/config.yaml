@@ -11,18 +11,10 @@ limits:
 
 groups:
   - id: 0
-    range: [1, 2]
-    cost: 0
-    depends: []
-  - id: 1
-    range: [3, 10]
+    range: [1, 1]
     cost: 30
     depends: []
-  - id: 2
-    range: [11, 20]
-    cost: 20
-    depends: [1]
-  - id: 3
-    range: [21, 30]
-    cost: 50
-    depends: [1, 2]
+  - id: 1
+    range: [2, 2]
+    cost: 70
+    depends: [0]

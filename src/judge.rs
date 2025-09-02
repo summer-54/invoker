@@ -1,6 +1,9 @@
 const COMPILATION_TIME_LIMIT: f64 = 10.;
 
-use tokio::{fs::create_dir, io::AsyncReadExt};
+use tokio::{
+    fs::{create_dir, remove_dir_all},
+    io::{AsyncReadExt, AsyncWriteExt},
+};
 
 use {
     serde::{Deserialize, Serialize},
@@ -11,7 +14,7 @@ use {
     },
 };
 
-use std::sync::Arc;
+use std::{fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use crate::{
     Result,
@@ -52,9 +55,9 @@ pub enum Lang {
 }
 
 impl Lang {
-    pub fn compile_command(&self, name: &str, result: &str) -> Box<str> {
+    pub fn compile_command(&self, name: &str, result: &str, output: &str) -> Box<str> {
         match self {
-            Self::Gpp => format!("g++ {name} -o {result} -Wall -O2 -lm"),
+            Self::Gpp => format!("/usr/bin/g++ {name} -o {result} -Wall -O2 -lm"),
         }
         .into_boxed_str()
     }
@@ -68,6 +71,7 @@ struct ProblemConfig {
     groups: Box<[Group]>,
 }
 
+#[derive(Debug, Clone)]
 pub enum FullResult {
     Ok {
         score: usize,
@@ -146,7 +150,9 @@ pub struct Service {
 
 impl Service {
     pub async fn new(isolate: Arc<isolate::Service>, work_dir: Box<str>) -> Service {
-        create_dir(&*work_dir).await.unwrap();
+        if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
+            create_dir(&*work_dir).await.unwrap();
+        }
         Service {
             work_dir,
             isolate,
@@ -161,20 +167,38 @@ impl Service {
         problem_config: Arc<ProblemConfig>,
         test_id: usize,
     ) -> Result<TestResult> {
+        log::trace!("{test_id} test function <box_id: {}>", sandbox.id());
+
         let limits = &problem_config.limits;
         let result = match problem_config.r#type {
             ProblemType::Standart => {
-                let input_path = format!("{}/inupt/{test_id}.txt", self.work_dir).into_boxed_str();
+                log::trace!("{test_id} test function 'STANDART'");
+                let input_path =
+                    format!("{}/input/{}.txt", self.work_dir, test_id + 1).into_boxed_str();
                 let correct_path =
-                    format!("{}/correct/{test_id}.txt", self.work_dir).into_boxed_str();
+                    format!("{}/correct/{}.txt", self.work_dir, test_id + 1).into_boxed_str();
                 let checker_path = format!("{}/checker.out", self.work_dir).into_boxed_str();
 
                 sandbox
                     .write_into_box(&mut File::open(&*input_path).await?, "in.txt")
                     .await?;
+                sandbox
+                    .write_into_box(
+                        &mut File::open(format!("{}/solution.out", self.work_dir)).await?,
+                        "solution.out",
+                    )
+                    .await?;
+
+                sandbox
+                    .write_into_box(
+                        &mut File::open(format!("{}/checker.out", self.work_dir)).await?,
+                        "checker.out",
+                    )
+                    .await?;
+
                 let solution_result = match sandbox
                     .run(
-                        format!("./solution.out > out.txt < in.txt").into_boxed_str(),
+                        format!("./solution.out").into_boxed_str(),
                         RunConfig {
                             time_limit: MaybeLimited::Limited(limits.time),
                             memory_limit: MaybeLimited::Limited(limits.memory),
@@ -183,6 +207,11 @@ impl Service {
                             stack_limit: Some(MaybeLimited::Limited(limits.stack)),
                             open_files_limit: None,
                             process_limit: None,
+                            env: false,
+
+                            stdin: Some("in.txt".to_string().into_boxed_str()),
+                            stdout: Some("out.txt".to_string().into_boxed_str()),
+                            stderr: None,
                         },
                     )
                     .await
@@ -216,16 +245,12 @@ impl Service {
                 }
 
                 if let Ok(mut correct) = File::open(&*correct_path).await {
-                    sandbox.write_into_box(&mut correct, "correct").await?;
+                    sandbox.write_into_box(&mut correct, "correct.txt").await?;
                 }
 
-                sandbox
-                    .write_into_box(&mut File::open(&*checker_path).await?, "correct.txt")
-                    .await?;
                 let checker_result = match sandbox
                     .run(
-                        format!("./checker.out in.txt out.txt correct.txt > checker_outputs.txt")
-                            .into_boxed_str(),
+                        format!("./checker.out in.txt out.txt correct.txt").into_boxed_str(),
                         RunConfig {
                             time_limit: MaybeLimited::Limited(limits.time),
                             memory_limit: MaybeLimited::Unlimited,
@@ -234,6 +259,12 @@ impl Service {
                             stack_limit: Some(MaybeLimited::Unlimited),
                             open_files_limit: Some(MaybeLimited::Unlimited),
                             process_limit: None,
+
+                            env: false,
+
+                            stdout: Some("checker_output.txt".to_string().into_boxed_str()),
+                            stdin: None,
+                            stderr: None,
                         },
                     )
                     .await
@@ -245,7 +276,7 @@ impl Service {
                     }
                 };
 
-                let mut checker_output_file = sandbox.read_from_box("out.txt").await?;
+                let mut checker_output_file = sandbox.read_from_box("checker_output.txt").await?;
                 let mut checker_output = String::new();
                 checker_output_file
                     .read_to_string(&mut checker_output)
@@ -285,6 +316,8 @@ impl Service {
                 }
             }
         };
+        log::trace!("{test_id} test function ENDED <box_id: {}>", sandbox.id());
+        drop(sandbox);
         Ok(result)
     }
 
@@ -307,18 +340,26 @@ impl Service {
         let sandbox = Arc::clone(&self.isolate).init_box().await?;
         sandbox
             .write_into_box(
-                &mut File::open(format!("{}/solution.cpp", &*self.work_dir)).await?,
+                &mut File::open(format!("{}/solution", &*self.work_dir)).await?,
                 "solution.cpp",
             )
             .await?;
 
         let compile_errors_path = "compile_errors";
+        let compile_command =
+            lang.compile_command("solution.cpp", "solution.out", compile_errors_path);
+        log::info!("compile command: {compile_command}");
+
         let compile_result = sandbox
             .run(
-                lang.compile_command("solution", "solution.out"),
+                compile_command,
                 RunConfig {
                     open_files_limit: Some(MaybeLimited::Unlimited),
                     time_limit: MaybeLimited::Limited(COMPILATION_TIME_LIMIT),
+                    process_limit: Some(MaybeLimited::Unlimited),
+                    env: true,
+
+                    stderr: Some(compile_errors_path.to_string().into_boxed_str()),
                     ..Default::default()
                 },
             )
@@ -329,26 +370,25 @@ impl Service {
         match compile_result.status {
             isolate::RunStatus::Tl | isolate::RunStatus::Ml | isolate::RunStatus::Sg(_) => {
                 let mut message = String::new();
-                sandbox
-                    .read_from_box(compile_errors_path)
-                    .await?
-                    .read_to_string(&mut message)
-                    .await?;
-
+                if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
+                    r.read_to_string(&mut message).await?;
+                }
                 return Ok(FullResult::Te(message.into_boxed_str()));
             }
             isolate::RunStatus::Re(_) => {
                 let mut message = String::new();
-                sandbox
-                    .read_from_box(compile_errors_path)
-                    .await?
-                    .read_to_string(&mut message)
-                    .await?;
+                if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
+                    r.read_to_string(&mut message).await?;
+                }
 
                 return Ok(FullResult::Ce(message.into_boxed_str()));
             }
             _ => (),
-        }
+        };
+
+        let mut file = tokio::fs::File::create(format!("{}/solution.out", self.work_dir)).await?;
+        tokio::io::copy(&mut sandbox.read_from_box("solution.out").await?, &mut file).await?;
+        file.set_permissions(Permissions::from_mode(0o777)).await?;
 
         drop(sandbox);
 
@@ -360,6 +400,7 @@ impl Service {
         ));
         for group in problem_config.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
+                log::trace!("looking on test: {test_number}");
                 if blocked_groups.lock().await[group.id].is_some() {
                     continue;
                 }
@@ -368,6 +409,8 @@ impl Service {
                         continue 'test;
                     }
                 }
+                log::trace!("{test_number} test started");
+
                 let sandbox = Arc::clone(&self.isolate).init_box().await?;
 
                 let blocked_groups = Arc::clone(&blocked_groups);
@@ -388,15 +431,16 @@ impl Service {
                         } else {
                             *block = Some(test_number);
                         }
-                        blocked_groups.lock().await[group.id] = Some(test_number);
                     }
                     Ok(())
                 }));
             }
         }
 
+        log::trace!("waiting all");
+
         for handler in handlers {
-            _ = handler.await?;
+            handler.await??;
         }
         let blocked_groups = blocked_groups.lock().await;
 
@@ -410,12 +454,15 @@ impl Service {
                 }
             })
             .collect();
+
         let result = FullResult::Ok {
             score: groups_score.iter().sum(),
             groups_score,
         };
 
-        remove_dir(&*self.work_dir).await?;
+        log::info!("full result: {result:?}");
+
+        remove_dir_all(&*self.work_dir).await?;
         tokio::fs::create_dir(&*self.work_dir).await?;
         drop(permit);
         Ok(result)
