@@ -2,13 +2,13 @@ const COMPILATION_TIME_LIMIT: f64 = 10.;
 
 use tokio::{
     fs::{create_dir, remove_dir_all},
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
 };
 
 use {
     serde::{Deserialize, Serialize},
     tokio::{
-        fs::{File, remove_dir},
+        fs::File,
         sync::{Mutex, Semaphore, mpsc::UnboundedSender},
         task::JoinHandle,
     },
@@ -55,7 +55,7 @@ pub enum Lang {
 }
 
 impl Lang {
-    pub fn compile_command(&self, name: &str, result: &str, output: &str) -> Box<str> {
+    pub fn compile_command(&self, name: &str, result: &str) -> Box<str> {
         match self {
             Self::Gpp => format!("/usr/bin/g++ {name} -o {result} -Wall -O2 -lm"),
         }
@@ -148,6 +148,26 @@ pub struct Service {
     handler: Mutex<Option<JoinHandle<()>>>,
 }
 
+const INPUT_DIR: &str = "input";
+const INPUT_EXT: Option<&str> = Some("txt");
+
+const CORRECT_DIR: &str = "correct";
+const CORRECT_EXT: Option<&str> = Some("txt");
+
+const CHECKER_NAME: &str = "checker";
+const CHECKER_EXT: Option<&str> = Some("out");
+
+const SOLUTION_NAME: &str = "solution";
+const SOLUTION_EXT: Option<&str> = Some("out");
+
+fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
+    format!(
+        "{dir}/{name}{}",
+        ext.map(|s| [".", s].concat()).unwrap_or("".to_string())
+    )
+    .into_boxed_str()
+}
+
 impl Service {
     pub async fn new(isolate: Arc<isolate::Service>, work_dir: Box<str>) -> Service {
         if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
@@ -173,32 +193,47 @@ impl Service {
         let result = match problem_config.r#type {
             ProblemType::Standart => {
                 log::trace!("{test_id} test function 'STANDART'");
-                let input_path =
-                    format!("{}/input/{}.txt", self.work_dir, test_id + 1).into_boxed_str();
-                let correct_path =
-                    format!("{}/correct/{}.txt", self.work_dir, test_id + 1).into_boxed_str();
-                let checker_path = format!("{}/checker.out", self.work_dir).into_boxed_str();
+                let src_input_path = path_from(
+                    &format!("{}/{INPUT_DIR}", self.work_dir),
+                    &format!("{}", test_id + 1),
+                    INPUT_EXT,
+                );
+                let src_correct_path = path_from(
+                    &format!("{}/{CORRECT_DIR}", self.work_dir),
+                    &format!("{}", test_id + 1),
+                    CORRECT_EXT,
+                );
+                let src_checker_path = path_from(&self.work_dir, CHECKER_NAME, CHECKER_EXT);
+
+                let src_solution_path = path_from(&self.work_dir, SOLUTION_NAME, SOLUTION_EXT);
+
+                const TARGET_INPUT_PATH: &str = "in.txt";
+                const TARGET_CORRECT_PATH: &str = "correct.txt";
+                const TARGET_OUTPUT_PATH: &str = "out.txt";
+                const TARGET_CHECKER_OUTPUT_PATH: &str = "cheker_out.txt";
+
+                const TARGET_CHECKER_PATH: &str = "checker.out";
+                const TARGET_SOLUTION_PATH: &str = "solution.out";
 
                 sandbox
-                    .write_into_box(&mut File::open(&*input_path).await?, "in.txt")
+                    .write_into_box(&mut File::open(&*src_input_path).await?, TARGET_INPUT_PATH)
                     .await?;
                 sandbox
                     .write_into_box(
-                        &mut File::open(format!("{}/solution.out", self.work_dir)).await?,
-                        "solution.out",
+                        &mut File::open(&*src_checker_path).await?,
+                        TARGET_CHECKER_PATH,
                     )
                     .await?;
-
                 sandbox
                     .write_into_box(
-                        &mut File::open(format!("{}/checker.out", self.work_dir)).await?,
-                        "checker.out",
+                        &mut File::open(&*src_solution_path).await?,
+                        TARGET_SOLUTION_PATH,
                     )
                     .await?;
 
                 let solution_result = match sandbox
                     .run(
-                        format!("./solution.out").into_boxed_str(),
+                        format!("./{TARGET_SOLUTION_PATH}").into_boxed_str(),
                         RunConfig {
                             time_limit: MaybeLimited::Limited(limits.time),
                             memory_limit: MaybeLimited::Limited(limits.memory),
@@ -209,8 +244,8 @@ impl Service {
                             process_limit: None,
                             env: false,
 
-                            stdin: Some("in.txt".to_string().into_boxed_str()),
-                            stdout: Some("out.txt".to_string().into_boxed_str()),
+                            stdin: Some(TARGET_INPUT_PATH.to_string().into_boxed_str()),
+                            stdout: Some(TARGET_OUTPUT_PATH.to_string().into_boxed_str()),
                             stderr: None,
                         },
                     )
@@ -244,13 +279,16 @@ impl Service {
                     });
                 }
 
-                if let Ok(mut correct) = File::open(&*correct_path).await {
-                    sandbox.write_into_box(&mut correct, "correct.txt").await?;
+                if let Ok(mut correct) = File::open(&*src_correct_path).await {
+                    sandbox
+                        .write_into_box(&mut correct, TARGET_CORRECT_PATH)
+                        .await?;
                 }
 
                 let checker_result = match sandbox
                     .run(
-                        format!("./checker.out in.txt out.txt correct.txt").into_boxed_str(),
+                        format!("./{TARGET_CHECKER_PATH} {TARGET_INPUT_PATH} {TARGET_OUTPUT_PATH} {TARGET_CORRECT_PATH}")
+                            .into_boxed_str(),
                         RunConfig {
                             time_limit: MaybeLimited::Limited(limits.time),
                             memory_limit: MaybeLimited::Unlimited,
@@ -262,7 +300,7 @@ impl Service {
 
                             env: false,
 
-                            stdout: Some("checker_output.txt".to_string().into_boxed_str()),
+                            stdout: Some(TARGET_CHECKER_OUTPUT_PATH.to_string().into_boxed_str()),
                             stdin: None,
                             stderr: None,
                         },
@@ -276,7 +314,8 @@ impl Service {
                     }
                 };
 
-                let mut checker_output_file = sandbox.read_from_box("checker_output.txt").await?;
+                let mut checker_output_file =
+                    sandbox.read_from_box(TARGET_CHECKER_OUTPUT_PATH).await?;
                 let mut checker_output = String::new();
                 checker_output_file
                     .read_to_string(&mut checker_output)
@@ -346,8 +385,7 @@ impl Service {
             .await?;
 
         let compile_errors_path = "compile_errors";
-        let compile_command =
-            lang.compile_command("solution.cpp", "solution.out", compile_errors_path);
+        let compile_command = lang.compile_command("solution.cpp", "solution.out");
         log::info!("compile command: {compile_command}");
 
         let compile_result = sandbox
