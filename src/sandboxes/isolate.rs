@@ -376,7 +376,7 @@ impl Sandbox {
             file
         })
         .await?;
-        log::info!("({log_st}) file '{to}' -> '{}/{to}'", self.inner_dir());
+        log::info!("({log_st}) '{to}' -> '{}/{to}'", self.inner_dir());
         Ok(())
     }
 
