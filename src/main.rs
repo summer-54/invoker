@@ -1,6 +1,7 @@
 mod api;
 mod archive;
 mod judge;
+mod log_utils;
 mod pull;
 mod sandboxes;
 mod ws;
@@ -13,6 +14,7 @@ use crate::{
 pub use {
     anyhow::{Error, Result, anyhow},
     env_logger,
+    log_utils::State as LogState,
     serde::{Deserialize, Serialize},
 };
 
@@ -59,7 +61,7 @@ impl App {
                         data,
                     })
                     .await
-                    .expect("webscoket isn't working unexpexted");
+                    .expect("webscoket closed unexpexted");
             }
         });
         let self_clone = Arc::clone(&self);
@@ -87,12 +89,12 @@ impl App {
                         log::error!("sending message error: {e:?}");
                     })
                     .expect("message sending error"),
-                Err(error) => {
-                    log::error!("judger error: {error}");
+                Err(e) => {
+                    log::error!("judger error: {e:?}");
                     self_clone
                         .ws
                         .send(api::outgo::Msg::Error {
-                            msg: error.to_string().into_boxed_str(),
+                            msg: e.to_string().into_boxed_str(),
                         })
                         .await
                         .unwrap();
@@ -104,7 +106,7 @@ impl App {
     pub async fn run(self: Arc<Self>) -> Result<()> {
         tokio::spawn(async move {
             loop {
-                log::info!("waiting for message...");
+                log::info!("message listner open");
                 let msg = self.ws.recv().await?;
                 match msg {
                     api::income::Msg::Start { data } => self.start_judging(data),

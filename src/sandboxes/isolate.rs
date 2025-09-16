@@ -1,12 +1,12 @@
 use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
-use tokio::io::AsyncRead;
+use crate::{LogState, Result, anyhow, pull::Pull};
 
-use crate::{Result, anyhow, pull::Pull};
-
-use {
-    serde::{Deserialize, Serialize},
-    tokio::{fs::File, io::AsyncWriteExt, process::Command},
+use serde::{Deserialize, Serialize};
+use tokio::{
+    fs::File,
+    io::{AsyncRead, AsyncWriteExt},
+    process::Command,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -135,7 +135,9 @@ impl Service {
 
     pub async fn init_box(self: Arc<Self>) -> Result<Sandbox> {
         let box_id = self.boxes_pull.take().await;
-        log::info!("isolate/box<id: {box_id}> starting...");
+        let mut log_st = LogState::new();
+        log_st = log_st.push("box", &*format!("{box_id}"));
+        log::info!("({log_st}) starting...");
         let output = Command::new(&*self.path)
             .arg("--init")
             .arg(format!("--box-id={box_id}"))
@@ -143,14 +145,14 @@ impl Service {
             .await
             .unwrap();
         if output.status.success() {
-            log::info!("isolate/box<id: {box_id}> started successfully");
+            log::info!("({log_st}) started successfully");
             Ok(Sandbox {
                 service: self,
                 id: box_id,
             })
         } else {
             Err(anyhow!(
-                "while initing box <id: {box_id}>, exitcode: {:?}, stderr:\n{:?}",
+                "({log_st}) while initing, exitcode: {:?}, stderr:\n{:?}",
                 output.status.code(),
                 String::from_utf8(output.stderr),
             ))
@@ -256,6 +258,8 @@ impl Sandbox {
 
     pub async fn run(&self, target_command: Box<str>, cfg: RunConfig) -> Result<RunResult> {
         let meta_path = format!("{}/meta", self.inner_dir());
+        let mut log_st = LogState::new();
+        log_st = log_st.push("box", &*format!("{}", self.id()));
 
         let mut command = Command::new(&*self.service.path);
         command
@@ -265,19 +269,19 @@ impl Sandbox {
         if let Some(input_path) = cfg.stdin {
             let path = format!("{}/{}", self.inner_dir(), input_path);
             tokio::fs::File::create(path.clone()).await?;
-            log::trace!("file: {path} created");
+            log::trace!("({log_st}) file: {path} created");
             command.arg(format!("--stdin={input_path}"));
         }
         if let Some(output_path) = cfg.stdout {
             let path = format!("{}/{}", self.inner_dir(), output_path);
             tokio::fs::File::create(path.clone()).await?;
-            log::trace!("file: {path} created");
+            log::trace!("({log_st}) file: {path} created");
             command.arg(format!("--stdout={output_path}"));
         }
         if let Some(error_path) = cfg.stderr {
             let path = format!("{}/{}", self.inner_dir(), error_path);
             tokio::fs::File::create(path.clone()).await?;
-            log::trace!("file: {path} created");
+            log::trace!("({log_st}) file: {path} created");
             command.arg(format!("--stderr={error_path}"));
         }
 
@@ -324,15 +328,12 @@ impl Sandbox {
             .arg("--")
             .args(target_command.to_string().split_ascii_whitespace());
 
-        log::info!(
-            "'{command:?}' executing in isolate/sanbox <id: {}>",
-            self.id
-        );
+        log::info!("({log_st}) executing '{command:?}'");
 
         _ = command.status().await?;
 
         let meta = tokio::fs::read_to_string(meta_path).await?;
-        log::trace!("meta file: {meta}");
+        log::trace!("({log_st}) meta file: {meta}");
         let meta = parse_meta_file(&meta);
 
         let result = RunResult {
@@ -356,7 +357,7 @@ impl Sandbox {
             killed: meta.get("killed").map(|s| &**s).unwrap_or("0") == "1",
         };
 
-        log::info!("run result: {result:?}");
+        log::info!("({log_st}) run result: {result:?}");
 
         Ok(result)
     }
@@ -366,18 +367,24 @@ impl Sandbox {
         from: &mut R,
         to: &str,
     ) -> Result<()> {
+        let mut log_st = LogState::new();
+        log_st = log_st.push("box", &*format!("{}", self.id()));
+
         _ = tokio::io::copy(from, &mut {
             let file = File::create(format!("{}/{to}", self.inner_dir())).await?;
             file.set_permissions(Permissions::from_mode(0o777)).await?;
             file
         })
         .await?;
-        log::info!("file '{to}' {}/{to} was created", self.inner_dir());
+        log::info!("({log_st}) file '{to}' -> '{}/{to}'", self.inner_dir());
         Ok(())
     }
 
     pub async fn read_from_box(&self, from: &str) -> Result<File> {
-        log::trace!("read_from_box: {}/{from}", self.inner_dir());
+        let mut log_st = LogState::new();
+        log_st = log_st.push("box", &*format!("{}", self.id()));
+
+        log::trace!("({log_st}) <- '{}/{from}'", self.inner_dir());
         Ok(tokio::fs::File::open(format!("{}/{from}", self.inner_dir())).await?)
     }
 }

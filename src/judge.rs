@@ -1,23 +1,17 @@
 const COMPILATION_TIME_LIMIT: f64 = 10.;
 
+use serde::{Deserialize, Serialize};
 use tokio::{
-    fs::{create_dir, remove_dir_all},
+    fs::{File, create_dir, remove_dir_all},
     io::AsyncReadExt,
-};
-
-use {
-    serde::{Deserialize, Serialize},
-    tokio::{
-        fs::File,
-        sync::{Mutex, Semaphore, mpsc::UnboundedSender},
-        task::JoinHandle,
-    },
+    sync::{Mutex, Semaphore, mpsc::UnboundedSender},
+    task::JoinHandle,
 };
 
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use crate::{
-    Result,
+    LogState, Result,
     sandboxes::isolate::{self, MaybeLimited, RunConfig, RunStatus, Sandbox},
 };
 
@@ -187,12 +181,15 @@ impl Service {
         problem_config: Arc<ProblemConfig>,
         test_id: usize,
     ) -> Result<TestResult> {
-        log::trace!("{test_id} test function <box_id: {}>", sandbox.id());
+        let mut log_st = LogState::new();
+        log_st = log_st.push("box", &*format!("{}", sandbox.id()));
+        log_st = log_st.push("test", &*format!("{test_id}"));
 
         let limits = &problem_config.limits;
         let result = match problem_config.r#type {
             ProblemType::Standart => {
-                log::trace!("{test_id} test function 'STANDART'");
+                let log_st = log_st.push("task type", "STANDART");
+                log::trace!("({log_st}) testing STARTED");
                 let src_input_path = path_from(
                     &format!("{}/{INPUT_DIR}", self.work_dir),
                     &format!("{}", test_id + 1),
@@ -253,7 +250,7 @@ impl Service {
                 {
                     Ok(res) => res,
                     Err(e) => {
-                        log::error!("run_solution erorr: {e}");
+                        log::error!("({log_st}) solution run erorr: {e:?}");
                         return Err(e);
                     }
                 };
@@ -283,6 +280,8 @@ impl Service {
                     sandbox
                         .write_into_box(&mut correct, TARGET_CORRECT_PATH)
                         .await?;
+                } else {
+                    log::debug!("({log_st}) correct file not founded");
                 }
 
                 let checker_result = match sandbox
@@ -309,7 +308,7 @@ impl Service {
                 {
                     Ok(res) => res,
                     Err(e) => {
-                        log::error!("checker erorr: {e}");
+                        log::error!("({log_st}) checker erorr: {e:?}");
                         return Err(e);
                     }
                 };
@@ -355,7 +354,7 @@ impl Service {
                 }
             }
         };
-        log::trace!("{test_id} test function ENDED <box_id: {}>", sandbox.id());
+        log::trace!("({log_st}) testing ENDED",);
         drop(sandbox);
         Ok(result)
     }
@@ -377,6 +376,10 @@ impl Service {
         let lang = problem_config.lang;
 
         let sandbox = Arc::clone(&self.isolate).init_box().await?;
+
+        let mut log_st = LogState::new();
+        log_st = log_st.push("box", &*format!("{}", sandbox.id()));
+
         sandbox
             .write_into_box(
                 &mut File::open(format!("{}/solution", &*self.work_dir)).await?,
@@ -403,7 +406,7 @@ impl Service {
             )
             .await?;
 
-        log::info!("compiling isolate/sandbox<id: {}>", sandbox.id());
+        log::info!("({log_st}) compiling");
 
         match compile_result.status {
             isolate::RunStatus::Tl | isolate::RunStatus::Ml | isolate::RunStatus::Sg(_) => {
@@ -438,7 +441,9 @@ impl Service {
         ));
         for group in problem_config.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
-                log::trace!("looking on test: {test_number}");
+                let mut log_st = LogState::new();
+                log_st = log_st.push("test", &*format!("{test_number}"));
+                log::trace!("({log_st}) looking on test");
                 if blocked_groups.lock().await[group.id].is_some() {
                     continue;
                 }
@@ -447,7 +452,7 @@ impl Service {
                         continue 'test;
                     }
                 }
-                log::trace!("{test_number} test started");
+                log::trace!("({log_st}) test started");
 
                 let sandbox = Arc::clone(&self.isolate).init_box().await?;
 
@@ -475,7 +480,7 @@ impl Service {
             }
         }
 
-        log::trace!("waiting all");
+        log::trace!("waiting all test processes");
 
         for handler in handlers {
             handler.await??;
