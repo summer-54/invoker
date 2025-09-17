@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     Result,
-    api::{income, outgo},
+    api::{self, income, outgo},
 };
 
 pub use http::Uri;
@@ -91,7 +91,9 @@ impl Service {
             read: Mutex::new(read),
         })
     }
-    pub async fn send(&self, msg: outgo::Msg) -> Result<()> {
+}
+impl api::outgo::Sender for Service {
+    async fn send(&self, msg: outgo::Msg) -> Result<()> {
         log::info!("sending: {msg:?}");
         self.write
             .lock()
@@ -170,8 +172,9 @@ impl Service {
             .await?;
         Ok(())
     }
-
-    pub async fn recv(&self) -> Result<income::Msg> {
+}
+impl api::income::Receiver for Service {
+    async fn recv(&self) -> Result<income::Msg> {
         loop {
             let mut msg = bytes::BytesMut::new();
             self.read.lock().await.read(&mut msg).await?;

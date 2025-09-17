@@ -1,13 +1,21 @@
+use crate::Result;
 pub mod income {
+    use super::Result;
+
     #[derive(Debug)]
     pub enum Msg {
         Start { data: Box<[u8]> },
         Stop,
         Close,
     }
+
+    pub trait Receiver: Send + Sync {
+        fn recv(&self) -> impl Future<Output = Result<Msg>> + Send;
+    }
 }
 
 pub mod outgo {
+    use super::Result;
     use crate::judge::Verdict;
 
     #[derive(Debug)]
@@ -41,5 +49,9 @@ pub mod outgo {
         OpError {
             msg: Box<str>,
         },
+    }
+
+    pub trait Sender: Send + Sync {
+        fn send(&self, msg: Msg) -> impl Future<Output = Result<()>> + Send;
     }
 }

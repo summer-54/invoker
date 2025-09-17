@@ -7,7 +7,10 @@ mod sandboxes;
 mod ws;
 
 use crate::{
-    api::outgo::{self, FullVerdict},
+    api::{
+        income::{self, Receiver},
+        outgo::{self, FullVerdict, Sender},
+    },
     archive::ArchiveItem,
 };
 
@@ -25,12 +28,13 @@ use {
     ws::Uri,
 };
 
-struct App {
-    pub ws: ws::Service,
+struct App<S: outgo::Sender, R: income::Receiver> {
+    pub sender: Arc<S>,
+    pub receiver: Arc<R>,
     pub judger: Arc<judge::Service>,
 }
 
-impl App {
+impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'static> App<S, R> {
     fn start_judging(self: &Arc<Self>, data: Box<[u8]>) {
         let self_clone = Arc::clone(&self);
         let (sender, mut receiver) = unbounded_channel::<(usize, judge::TestResult)>();
@@ -52,7 +56,7 @@ impl App {
                     vec![].into_boxed_slice()
                 });
                 self_clone
-                    .ws
+                    .sender
                     .send(api::outgo::Msg::TestVerdict {
                         test_id: id,
                         verdict: test_result.verdict,
@@ -72,7 +76,7 @@ impl App {
             _ = handler.await;
             match result {
                 Ok(full_verdict) => self_clone
-                    .ws
+                    .sender
                     .send(api::outgo::Msg::FullVerdict(match full_verdict {
                         judge::FullResult::Ok {
                             score,
@@ -92,7 +96,7 @@ impl App {
                 Err(e) => {
                     log::error!("judger error: {e:?}");
                     self_clone
-                        .ws
+                        .sender
                         .send(api::outgo::Msg::Error {
                             msg: e.to_string().into_boxed_str(),
                         })
@@ -107,7 +111,7 @@ impl App {
         tokio::spawn(async move {
             loop {
                 log::info!("message listner open");
-                let msg = self.ws.recv().await?;
+                let msg = self.receiver.recv().await?;
                 match msg {
                     api::income::Msg::Start { data } => self.start_judging(data),
                     api::income::Msg::Stop => self.judger.stop_all().await?,
@@ -150,27 +154,32 @@ async fn main() -> Result<()> {
     let isolate_client =
         sandboxes::isolate::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
-    let ws_client = ws::Service::new(
-        config.manager_host.as_ref(),
-        Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
-    )
-    .await?;
+    let ws_client = Arc::new(
+        ws::Service::new(
+            config.manager_host.as_ref(),
+            Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
+        )
+        .await?,
+    );
 
     ws_client.send(api::outgo::Msg::Token(token)).await?;
 
-    let app = App {
-        ws: ws_client,
+    let app = App::<ws::Service, ws::Service> {
+        sender: ws_client.clone(),
+        receiver: ws_client.clone(),
         judger: Arc::new(judge::Service::new(isolate_client, judger_work_dir).await),
     };
 
     let app = Arc::new(app);
     let result = Arc::clone(&app).run();
+
     app.start_judging(tokio::fs::read("problem.tar").await?.into_boxed_slice());
+
     let result = result.await;
 
     match result {
         Ok(_) => {
-            app.ws
+            app.sender
                 .send(outgo::Msg::Exited {
                     code: 0,
                     data: Box::from(""),
@@ -179,7 +188,7 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             log::error!("error: '{e}'");
-            app.ws
+            app.sender
                 .send(outgo::Msg::Exited {
                     code: 1,
                     data: e.to_string().into_boxed_str(),
