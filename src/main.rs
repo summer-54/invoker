@@ -108,20 +108,17 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
-        tokio::spawn(async move {
-            loop {
-                log::info!("message listner open");
-                let msg = self.receiver.recv().await?;
-                match msg {
-                    api::income::Msg::Start { data } => self.start_judging(data),
-                    api::income::Msg::Stop => self.judger.stop_all().await?,
-                    api::income::Msg::Close => break,
-                }
+        loop {
+            log::info!("message listner open");
+            let msg = self.receiver.recv().await?;
+            match msg {
+                api::income::Msg::Start { data } => self.start_judging(data),
+                api::income::Msg::Stop => self.judger.stop_all().await?,
+                api::income::Msg::Close => break,
             }
-            log::info!("message listner close close");
-            Result::<()>::Ok(())
-        })
-        .await?
+        }
+        log::info!("message listner close close");
+        Result::<()>::Ok(())
     }
 }
 
@@ -173,7 +170,7 @@ async fn main() -> Result<()> {
     let app = Arc::new(app);
     let result = Arc::clone(&app).run();
 
-    app.start_judging(tokio::fs::read("problem.tar").await?.into_boxed_slice());
+    // app.start_judging(tokio::fs::read("problem.tar").await?.into_boxed_slice());
 
     let result = result.await;
 

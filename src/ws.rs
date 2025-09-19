@@ -110,7 +110,7 @@ impl api::outgo::Sender for Service {
                                     score,
                                     groups_score,
                                 } => {
-                                    map.push(("VERDICT".into(), "OK".into()));
+                                    map.push(("NAME".into(), "OK".into()));
                                     map.push(("SUM".into(), format!("{score}").into()));
                                     map.push((
                                         "GROUPS".into(),
@@ -124,11 +124,11 @@ impl api::outgo::Sender for Service {
                                     ));
                                 }
                                 outgo::FullVerdict::Ce(msg) => {
-                                    map.push(("VERDICT".into(), "CE".into()));
+                                    map.push(("NAME".into(), "CE".into()));
                                     map.push(("MESSAGE".into(), msg));
                                 }
                                 outgo::FullVerdict::Te(msg) => {
-                                    map.push(("VERDICT".into(), "CE".into()));
+                                    map.push(("NAME".into(), "TE".into()));
                                     map.push(("MESSAGE".into(), msg));
                                 }
                             }

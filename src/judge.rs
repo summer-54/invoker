@@ -46,12 +46,23 @@ struct Group {
 pub enum Lang {
     #[serde(rename = "g++")]
     Gpp,
+    #[serde(rename = "python3")]
+    Python,
 }
 
 impl Lang {
     pub fn compile_command(&self, name: &str, result: &str) -> Box<str> {
         match self {
             Self::Gpp => format!("/usr/bin/g++ {name} -o {result} -Wall -O2 -lm"),
+            Self::Python => format!("/usr/bin/cp --update=none {name} {result}"),
+        }
+        .into_boxed_str()
+    }
+
+    pub fn run_command(&self, name: &str) -> Box<str> {
+        match self {
+            Self::Gpp => format!("./{name}"),
+            Self::Python => format!("/usr/bin/python3 {name}"),
         }
         .into_boxed_str()
     }
@@ -180,6 +191,7 @@ impl Service {
         sandbox: Sandbox,
         problem_config: Arc<ProblemConfig>,
         test_id: usize,
+        lang: Lang,
     ) -> Result<TestResult> {
         let mut log_st = LogState::new();
         log_st = log_st.push("box", &*format!("{}", sandbox.id()));
@@ -230,7 +242,7 @@ impl Service {
 
                 let solution_result = match sandbox
                     .run(
-                        format!("./{TARGET_SOLUTION_PATH}").into_boxed_str(),
+                        lang.run_command(TARGET_SOLUTION_PATH),
                         RunConfig {
                             time_limit: MaybeLimited::Limited(limits.time),
                             memory_limit: MaybeLimited::Limited(limits.memory),
@@ -464,7 +476,7 @@ impl Service {
 
                 handlers.push(tokio::spawn(async move {
                     let result = self_clone
-                        .test(sandbox, problem_config, test_number)
+                        .test(sandbox, problem_config, test_number, lang)
                         .await?;
                     sender.send((test_number + 1, result.clone())).unwrap();
                     if !result.verdict.is_success() {
