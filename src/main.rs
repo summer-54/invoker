@@ -6,12 +6,15 @@ mod pull;
 mod sandboxes;
 mod ws;
 
+use tokio::task::JoinHandle;
+
 use crate::{
     api::{
         income::{self, Receiver},
         outgo::{self, FullVerdict, Sender},
     },
     archive::ArchiveItem,
+    judge::FullResult,
 };
 
 pub use {
@@ -35,7 +38,7 @@ struct App<S: outgo::Sender, R: income::Receiver> {
 }
 
 impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'static> App<S, R> {
-    fn start_judging(self: &Arc<Self>, data: Box<[u8]>) {
+    fn start_judging(self: &Arc<Self>, data: Box<[u8]>) -> JoinHandle<crate::Result<FullResult>> {
         let self_clone = Arc::clone(&self);
         let (sender, mut receiver) = unbounded_channel::<(usize, judge::TestResult)>();
         let handler = tokio::spawn(async move {
@@ -74,7 +77,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
             let package = archive::decompress(&*data).await;
             let result = Arc::clone(&self_clone.judger).judge(package, sender).await;
             _ = handler.await;
-            match result {
+            match &result {
                 Ok(full_verdict) => self_clone
                     .sender
                     .send(api::outgo::Msg::FullVerdict(match full_verdict {
@@ -82,11 +85,11 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                             score,
                             groups_score,
                         } => FullVerdict::Ok {
-                            score,
-                            groups_score,
+                            score: *score,
+                            groups_score: groups_score.clone(),
                         },
-                        judge::FullResult::Ce(msg) => FullVerdict::Ce(msg),
-                        judge::FullResult::Te(msg) => FullVerdict::Te(msg),
+                        judge::FullResult::Ce(msg) => FullVerdict::Ce(msg.clone()),
+                        judge::FullResult::Te(msg) => FullVerdict::Te(msg.clone()),
                     }))
                     .await
                     .map_err(|e| {
@@ -104,7 +107,8 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                         .unwrap();
                 }
             }
-        });
+            result
+        })
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
@@ -112,7 +116,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
             log::info!("message listner open");
             let msg = self.receiver.recv().await?;
             match msg {
-                api::income::Msg::Start { data } => self.start_judging(data),
+                api::income::Msg::Start { data } => _ = self.start_judging(data),
                 api::income::Msg::Stop => self.judger.stop_all().await?,
                 api::income::Msg::Close => break,
             }
@@ -169,8 +173,9 @@ async fn main() -> Result<()> {
 
     let app = Arc::new(app);
     let result = Arc::clone(&app).run();
-
-    // app.start_judging(tokio::fs::read("problem.tar").await?.into_boxed_slice());
+    for name in std::env::args().skip(1) {
+        app.start_judging(tokio::fs::read(name.as_str()).await?.into_boxed_slice());
+    }
 
     let result = result.await;
 
