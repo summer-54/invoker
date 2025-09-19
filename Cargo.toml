@@ -27,3 +27,6 @@ tokio-tar = { version = "*" }
 
 uuid = { version = "*", features = ["v4"] }
 envy = { version = "*" }
+
+[features]
+mock = []

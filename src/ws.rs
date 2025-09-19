@@ -67,7 +67,7 @@ pub struct Service {
 impl Service {
     pub async fn new<A: ToSocketAddrs>(socket_addr: A, uri: Uri) -> Result<Service> {
         let stream = TcpStream::connect(socket_addr).await?;
-        log::trace!("(socket_add)start subscribing");
+        log::trace!("websocket start subscribing");
         let client = subscribe_with(
             WebSocketConfig::default(),
             stream,
