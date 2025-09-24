@@ -11,7 +11,8 @@ Cargo.lock linguist-generated=true
 # Exclude build artifacts and dependencies
 target/** linguist-vendored=true
 
-# Exclude test data that might skew language detection
+# Exclude test data and templates that might skew language detection
+*.h linguist-vendored=true
 save/** linguist-vendored=true
 
 # Include important configuration files
