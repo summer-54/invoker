@@ -1,3 +1,5 @@
+![](icon.png)
+
 # Configs
 ## `isolate.yaml`
 
