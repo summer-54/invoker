@@ -178,7 +178,6 @@ impl api::income::Receiver for Service {
         loop {
             let mut msg = bytes::BytesMut::new();
             self.read.lock().await.read(&mut msg).await?;
-
             let (map, data) = deserialize_msg(&*msg);
             let Some(msg_type) = map.get("TYPE") else {
                 log::error!("field 'TYPE' not found");

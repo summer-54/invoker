@@ -12,8 +12,8 @@ Cargo.lock linguist-generated=true
 target/** linguist-vendored=true
 
 # Exclude test data and templates that might skew language detection
-**.h linguist-vendored=true
 save/** linguist-vendored=true
+**.h linguist-vendored=true
 
 # Include important configuration files
 WARP.md linguist-documentation=true

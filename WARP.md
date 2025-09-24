@@ -90,7 +90,7 @@ type: standart
 lang: g++
 limits:
   time: 2000        # milliseconds
-  real_time: 2000   # milliseconds  
+  real_time: 2000   # milliseconds
   memory: 512000    # KB
   stack: 512000     # KB (optional)
 groups:
@@ -120,7 +120,7 @@ groups:
 - Failed tests block dependent groups from execution
 - Semaphore ensures only one judging session runs at a time
 
-### Sandbox Management  
+### Sandbox Management
 - Each test gets its own isolated sandbox instance
 - Configurable resource limits (time, memory, processes, files)
 - Automatic cleanup after test completion
