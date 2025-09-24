@@ -27,7 +27,7 @@ struct ProblemLimits {
     real_time: f64,
 
     memory: u64,
-    stack: usize,
+    stack: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -248,9 +248,9 @@ impl Service {
                             memory_limit: MaybeLimited::Limited(limits.memory),
                             real_time_limit: limits.real_time,
                             extra_time_limit: None,
-                            stack_limit: Some(MaybeLimited::Limited(limits.stack)),
+                            stack_limit: limits.stack.map(|s| MaybeLimited::Limited(s)),
                             open_files_limit: None,
-                            process_limit: None,
+                            process_limit: Some(MaybeLimited::Limited(1)),
                             env: false,
 
                             stdin: Some(TARGET_INPUT_PATH.to_string().into_boxed_str()),
@@ -384,6 +384,9 @@ impl Service {
             .await?
             .read_to_string(&mut text)
             .await?;
+
+        log::trace!("config.yaml: {text}");
+
         let problem_config: Arc<ProblemConfig> = Arc::new(serde_yml::from_str(text.as_str())?);
         let lang = problem_config.lang;
 
