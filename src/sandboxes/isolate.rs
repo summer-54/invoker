@@ -267,9 +267,6 @@ impl Sandbox {
             .arg(format!("--meta={meta_path}"));
 
         if let Some(input_path) = cfg.stdin {
-            let path = format!("{}/{}", self.inner_dir(), input_path);
-            tokio::fs::File::create(path.clone()).await?;
-            log::trace!("({log_st}) file: {path} created");
             command.arg(format!("--stdin={input_path}"));
         }
         if let Some(output_path) = cfg.stdout {

@@ -1,0 +1,29 @@
+# Language detection - prioritize Rust, TOML, and Shell
+*.rs linguist-language=Rust
+*.toml linguist-language=TOML
+*.sh linguist-language=Shell
+
+# Exclude files that shouldn't count towards language statistics
+Cargo.lock linguist-generated=true
+*.md linguist-documentation=true
+*.txt linguist-documentation=true
+
+# Exclude build artifacts and dependencies
+target/ linguist-vendored=true
+
+# Exclude test data and templates that might skew language detection
+templates/ linguist-vendored=true
+save/ linguist-vendored=true
+
+# Include important configuration files
+Cargo.toml linguist-language=TOML
+WARP.md linguist-documentation=true
+
+# Line ending normalization
+* text=auto
+*.rs text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
