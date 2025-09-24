@@ -9,11 +9,11 @@ Cargo.lock linguist-generated=true
 *.txt linguist-documentation=true
 
 # Exclude build artifacts and dependencies
-target/ linguist-vendored=true
+target/** linguist-vendored=true
 
 # Exclude test data and templates that might skew language detection
-templates/ linguist-vendored=true
-save/ linguist-vendored=true
+templates/** linguist-vendored=true
+save/** linguist-vendored=true
 
 # Include important configuration files
 Cargo.toml linguist-language=TOML
