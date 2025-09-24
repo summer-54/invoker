@@ -11,12 +11,10 @@ Cargo.lock linguist-generated=true
 # Exclude build artifacts and dependencies
 target/** linguist-vendored=true
 
-# Exclude test data and templates that might skew language detection
-templates/** linguist-vendored=true
+# Exclude test data that might skew language detection
 save/** linguist-vendored=true
 
 # Include important configuration files
-Cargo.toml linguist-language=TOML
 WARP.md linguist-documentation=true
 
 # Line ending normalization
