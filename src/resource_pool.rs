@@ -2,12 +2,12 @@ use tokio::sync::{
     Mutex,
     mpsc::{UnboundedReceiver, UnboundedSender},
 };
-pub struct Pull<I> {
+pub struct ResourcePool<I> {
     sender: UnboundedSender<I>,
     receiver: Mutex<UnboundedReceiver<I>>,
 }
 
-impl<I> FromIterator<I> for Pull<I> {
+impl<I> FromIterator<I> for ResourcePool<I> {
     fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
         let this = Self::new();
@@ -18,7 +18,7 @@ impl<I> FromIterator<I> for Pull<I> {
     }
 }
 
-impl<T> Pull<T> {
+impl<T> ResourcePool<T> {
     pub fn new() -> Self {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         Self {

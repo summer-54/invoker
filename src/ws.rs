@@ -200,7 +200,7 @@ impl api::income::Receiver for Service {
                 }
             };
 
-            log::info!("recieved message: {msg:?}");
+            log::info!("received message: {msg:?}");
             return Ok(msg);
         }
     }

@@ -1,6 +1,10 @@
 use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
-use crate::{LogState, Result, anyhow, pull::Pull};
+use crate::{
+    LogState, Result, anyhow,
+    config_loader::{self, Config as _},
+    resource_pool::ResourcePool,
+};
 
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -42,7 +46,6 @@ pub struct IsolateConfig {
 }
 
 const ISOLATE_CONFIG_PATH: &str = "/usr/local/etc/isolate";
-const CONFIG_NAME: &str = "isolate.yaml";
 
 impl Default for IsolateConfig {
     fn default() -> Self {
@@ -63,36 +66,24 @@ impl Default for IsolateConfig {
     }
 }
 
+impl config_loader::Config for IsolateConfig {
+    const NAME: &'static str = "isolate";
+}
+
 impl IsolateConfig {
-    pub async fn init(configs_dir: &str) -> IsolateConfig {
-        let path = format!("{configs_dir}/{CONFIG_NAME}").into_boxed_str();
-        let this = if !tokio::fs::try_exists(&*path).await.unwrap() {
-            let this = IsolateConfig::default();
-
-            tokio::fs::write(&*path, serde_yml::to_string(&this).unwrap())
-                .await
-                .unwrap();
-
-            log::warn!("invoker config not found by path: {}", path);
-            log::info!("invoker config was automaticly created by path: {}", path);
-
-            this
-        } else {
-            serde_yml::from_str(&tokio::fs::read_to_string(&*path).await.unwrap()).unwrap()
-        };
-
+    pub async fn write_config_file(&self) {
         let mut isolate_config_file = File::create(ISOLATE_CONFIG_PATH).await.unwrap();
         isolate_config_file
             .write_all(
                 format!(
                     "box_root={}\nlock_root={}\ncg_root={}\nfirst_uid={}\nfirst_gid={}\nnum_boxes={}\nrestricted_init={}\n",
-                    this.box_root,
-                    this.lock_root,
-                    this.cg_root,
-                    this.first_uid,
-                    this.first_gid,
-                    this.sandboxes_count,
-                    if this.restricted_init {
+                    self.box_root,
+                    self.lock_root,
+                    self.cg_root,
+                    self.first_uid,
+                    self.first_gid,
+                    self.sandboxes_count,
+                    if self.restricted_init {
                         1
                     } else {
                         0
@@ -102,14 +93,13 @@ impl IsolateConfig {
             )
             .await
             .unwrap();
-        this
     }
 }
 
 pub struct Service {
     config: IsolateConfig,
     path: Box<str>,
-    boxes_pull: Pull<usize>,
+    boxes_pull: ResourcePool<usize>,
 }
 
 impl Service {
@@ -124,7 +114,8 @@ impl Service {
             return Err(anyhow!("isolate doesn't exist by path '{path}'"));
         }
 
-        let config = IsolateConfig::init(config_dir).await;
+        let config = IsolateConfig::load(config_dir).await;
+        config.write_config_file().await;
 
         Ok(Arc::new(Service {
             boxes_pull: (0..config.sandboxes_count).collect(),
@@ -133,11 +124,11 @@ impl Service {
         }))
     }
 
-    pub async fn init_box(self: Arc<Self>) -> Result<Sandbox> {
+    pub async fn initialize_sandbox(self: Arc<Self>) -> Result<Sandbox> {
         let box_id = self.boxes_pull.take().await;
-        let mut log_st = LogState::new();
-        log_st = log_st.push("box", &*format!("{box_id}"));
-        log::info!("({log_st}) starting...");
+        let mut log_state = LogState::new();
+        log_state = log_state.push("box", &*format!("{box_id}"));
+        log::info!("({log_state}) starting...");
         let output = Command::new(&*self.path)
             .arg("--init")
             .arg(format!("--box-id={box_id}"))
@@ -145,14 +136,14 @@ impl Service {
             .await
             .unwrap();
         if output.status.success() {
-            log::info!("({log_st}) started successfully");
+            log::info!("({log_state}) started successfully");
             Ok(Sandbox {
                 service: self,
                 id: box_id,
             })
         } else {
             Err(anyhow!(
-                "({log_st}) while initing, exitcode: {:?}, stderr:\n{:?}",
+                "({log_state}) while initing, exitcode: {:?}, stderr:\n{:?}",
                 output.status.code(),
                 String::from_utf8(output.stderr),
             ))

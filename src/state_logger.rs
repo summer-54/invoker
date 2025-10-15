@@ -1,13 +1,13 @@
 use std::{fmt::Display, sync::Arc};
 
 use colored::Colorize;
-pub struct State(Option<(Arc<State>, Box<str>, Box<str>)>);
-impl State {
+pub struct LogState(Option<(Arc<LogState>, Box<str>, Box<str>)>);
+impl LogState {
     pub fn new() -> Arc<Self> {
-        Arc::new(State(None))
+        Arc::new(LogState(None))
     }
     pub fn push(self: &Arc<Self>, key: &str, value: &str) -> Arc<Self> {
-        Arc::new(State(Some((
+        Arc::new(LogState(Some((
             Arc::clone(&self),
             Box::from(key),
             Box::from(value),
@@ -15,7 +15,7 @@ impl State {
     }
 }
 
-impl Display for State {
+impl Display for LogState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((prev, key, value)) = &self.0 {
             if prev.0.is_some() {

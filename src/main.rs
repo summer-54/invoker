@@ -1,8 +1,9 @@
 mod api;
 mod archive;
+mod config_loader;
 mod judge;
-mod log_utils;
-mod pull;
+mod state_logger;
+mod resource_pool;
 mod sandboxes;
 mod ws;
 
@@ -10,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     api::{
-        income::{self, Receiver},
+        income,
         outgo::{self, FullVerdict, Sender},
     },
     archive::ArchiveItem,
@@ -20,7 +21,7 @@ use crate::{
 pub use {
     anyhow::{Error, Result, anyhow},
     env_logger,
-    log_utils::State as LogState,
+    state_logger::LogState,
     serde::{Deserialize, Serialize},
 };
 
@@ -34,11 +35,11 @@ use {
 struct App<S: outgo::Sender, R: income::Receiver> {
     pub sender: Arc<S>,
     pub receiver: Arc<R>,
-    pub judger: Arc<judge::Service>,
+    pub judge_service: Arc<judge::Service>,
 }
 
 impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'static> App<S, R> {
-    fn start_judging(self: &Arc<Self>, data: Box<[u8]>) -> JoinHandle<crate::Result<FullResult>> {
+    fn start_judgment(self: &Arc<Self>, data: Box<[u8]>) -> JoinHandle<crate::Result<FullResult>> {
         let self_clone = Arc::clone(&self);
         let (sender, mut receiver) = unbounded_channel::<(usize, judge::TestResult)>();
         let handler = tokio::spawn(async move {
@@ -55,7 +56,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                 ])
                 .await
                 .unwrap_or_else(|e| {
-                    log::error!("sennding 'TestVerdict': compression error: {e}");
+                    log::error!("sending 'TestVerdict': compression error: {e}");
                     vec![].into_boxed_slice()
                 });
                 self_clone
@@ -68,14 +69,14 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                         data,
                     })
                     .await
-                    .expect("webscoket closed unexpexted");
+                    .expect("websocket closed unexpectedly");
             }
         });
         let self_clone = Arc::clone(&self);
 
         tokio::spawn(async move {
             let package = archive::decompress(&*data).await;
-            let result = Arc::clone(&self_clone.judger).judge(package, sender).await;
+            let result = Arc::clone(&self_clone.judge_service).judge(package, sender).await;
             _ = handler.await;
             match &result {
                 Ok(full_verdict) => self_clone
@@ -116,8 +117,8 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
             log::info!("message listner open");
             let msg = self.receiver.recv().await?;
             match msg {
-                api::income::Msg::Start { data } => _ = self.start_judging(data),
-                api::income::Msg::Stop => self.judger.stop_all().await?,
+                api::income::Msg::Start { data } => _ = self.start_judgment(data),
+                api::income::Msg::Stop => self.judge_service.cancel_all_tests().await?,
                 api::income::Msg::Close => break,
             }
         }
@@ -138,7 +139,7 @@ struct Config {
 impl Config {
     pub async fn init() -> Result<Self> {
         let config = envy::prefixed("INVOKER_").from_env::<Config>()?;
-        log::info!("enviroment variables: {config:#?}");
+        log::info!("environment variables: {config:#?}");
         Ok(config)
     }
 }
@@ -152,10 +153,10 @@ async fn main() -> Result<()> {
     let token = Uuid::new_v4();
     println!("invoker token: {token}");
 
-    let isolate_client =
+    let isolate_service =
         sandboxes::isolate::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
-    let ws_client = Arc::new(
+    let websocket_service = Arc::new(
         ws::Service::new(
             config.manager_host.as_ref(),
             Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
@@ -163,18 +164,20 @@ async fn main() -> Result<()> {
         .await?,
     );
 
-    ws_client.send(api::outgo::Msg::Token(token)).await?;
+    websocket_service.send(api::outgo::Msg::Token(token)).await?;
 
     let app = App::<ws::Service, ws::Service> {
-        sender: ws_client.clone(),
-        receiver: ws_client.clone(),
-        judger: Arc::new(judge::Service::new(isolate_client, judger_work_dir).await),
+        sender: websocket_service.clone(),
+        receiver: websocket_service.clone(),
+        judge_service: Arc::new(
+            judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
+        ),
     };
 
     let app = Arc::new(app);
     let result = Arc::clone(&app).run();
     for name in std::env::args().skip(1) {
-        app.start_judging(tokio::fs::read(name.as_str()).await?.into_boxed_slice());
+        app.start_judgment(tokio::fs::read(name.as_str()).await?.into_boxed_slice());
     }
 
     let result = result.await;
