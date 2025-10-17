@@ -27,7 +27,7 @@ Config for sandbox manager
 ``` yaml
 sandboxes_count: 1000
 process_default_limit: !Limited 1
-stack_default_limit: Unlimited
+stack_default_limit: !Unlimited
 extra_time_default_limit: 0.0
 open_files_default_limit: !Limited 2
 box_root: /.invoker/isolate
@@ -37,6 +37,22 @@ first_uid: 60000
 first_gid: 60000
 restricted_init: false
 ```
+## `judge.yaml`
+
+Configs for judging
+
+``` yaml
+compilation_commands:
+  g++: /usr/bin/g++ $SOURCE -o $OUTPUT -O2 -Wall -lm
+  python3: /usr/bin/cp --update=none $SOURCE $OUTPUT
+```
+### `compilation_commands`
+
+| Field     | Type  | Description                       | Default                                         |
+| --------- | ----- | --------------------------------- | ----------------------------------------------- |
+| `g++`     | `str` | Command for compilation _C++_     | `/usr/bin/g++ $SOURCE -o $OUTPUT -O2 -Wall -lm` |
+| `python3` | `str` | Command that copied _Python_ file | `/usr/bin/cp --update=none $SOURCE $OUTPUT`     |
+
 # Enviroment variables
 
 - `INVOKER_MANAGER_HOST: SocketAddr` for example  `127.0.0.1:5477`
@@ -185,7 +201,7 @@ groups:
 | `limits` | `ProblemLimits` | Limits for solutiuon |
 | `groups` | \[Group]        | Groups configs       |
 ## `ProblemType`
-- `standart`
+- `standard`
 ## `Lang`
 - `g++`
 ## `ProblemLimits`
