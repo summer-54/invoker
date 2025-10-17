@@ -2,9 +2,9 @@ mod api;
 mod archive;
 mod config_loader;
 mod judge;
-mod state_logger;
 mod resource_pool;
 mod sandboxes;
+mod state_logger;
 mod ws;
 
 use tokio::task::JoinHandle;
@@ -21,8 +21,8 @@ use crate::{
 pub use {
     anyhow::{Error, Result, anyhow},
     env_logger,
-    state_logger::LogState,
     serde::{Deserialize, Serialize},
+    state_logger::LogState,
 };
 
 use {
@@ -76,7 +76,9 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
 
         tokio::spawn(async move {
             let package = archive::decompress(&*data).await;
-            let result = Arc::clone(&self_clone.judge_service).judge(package, sender).await;
+            let result = Arc::clone(&self_clone.judge_service)
+                .judge(package, sender)
+                .await;
             _ = handler.await;
             match &result {
                 Ok(full_verdict) => self_clone
@@ -164,7 +166,9 @@ async fn main() -> Result<()> {
         .await?,
     );
 
-    websocket_service.send(api::outgo::Msg::Token(token)).await?;
+    websocket_service
+        .send(api::outgo::Msg::Token(token))
+        .await?;
 
     let app = App::<ws::Service, ws::Service> {
         sender: websocket_service.clone(),
