@@ -294,6 +294,8 @@ impl Service {
         test_id: usize,
         lang: Lang,
     ) -> Result<TestResult> {
+        let sandbox = Arc::new(sandbox);
+
         let mut log_state = LogState::new();
         log_state = log_state.push("box", &*format!("{}", sandbox.id()));
         log_state = log_state.push("test", &*format!("{test_id}"));
@@ -321,26 +323,45 @@ impl Service {
                 const TARGET_CORRECT_PATH: &str = "correct.txt";
                 const TARGET_OUTPUT_PATH: &str = "out.txt";
                 const TARGET_CHECKER_OUTPUT_PATH: &str = "checker_out.txt";
+                const TARGET_CHECKER_ERROR_PATH: &str = "checker_err.txt";
 
                 const TARGET_CHECKER_PATH: &str = "checker.out";
                 const TARGET_SOLUTION_PATH: &str = "solution.out";
+                {
+                    let mut handlers = Vec::new();
+                    let sandbox_clone = Arc::clone(&sandbox);
+                    handlers.push(tokio::spawn(async move {
+                        sandbox_clone
+                            .write_into_box(
+                                &mut File::open(&*src_input_path).await?,
+                                TARGET_INPUT_PATH,
+                            )
+                            .await
+                    }));
 
-                sandbox
-                    .write_into_box(&mut File::open(&*src_input_path).await?, TARGET_INPUT_PATH)
-                    .await?;
-                sandbox
-                    .write_into_box(
-                        &mut File::open(&*src_checker_path).await?,
-                        TARGET_CHECKER_PATH,
-                    )
-                    .await?;
-                sandbox
-                    .write_into_box(
-                        &mut File::open(&*src_solution_path).await?,
-                        TARGET_SOLUTION_PATH,
-                    )
-                    .await?;
+                    let sandbox_clone = Arc::clone(&sandbox);
+                    handlers.push(tokio::spawn(async move {
+                        sandbox_clone
+                            .write_into_box(
+                                &mut File::open(&*src_checker_path).await?,
+                                TARGET_CHECKER_PATH,
+                            )
+                            .await
+                    }));
+                    let sandbox_clone = Arc::clone(&sandbox);
+                    handlers.push(tokio::spawn(async move {
+                        sandbox_clone
+                            .write_into_box(
+                                &mut File::open(&*src_solution_path).await?,
+                                TARGET_SOLUTION_PATH,
+                            )
+                            .await
+                    }));
 
+                    for handler in handlers {
+                        handler.await??;
+                    }
+                }
                 let solution_result = match sandbox
                     .run(
                         lang.run_command(TARGET_SOLUTION_PATH),
@@ -414,7 +435,7 @@ impl Service {
 
                             stdout: Some(TARGET_CHECKER_OUTPUT_PATH.to_string().into_boxed_str()),
                             stdin: None,
-                            stderr: None,
+                            stderr: Some(TARGET_CHECKER_ERROR_PATH.to_string().into_boxed_str()),
                         },
                     )
                     .await
@@ -426,24 +447,43 @@ impl Service {
                     }
                 };
 
-                let mut checker_output_file =
-                    sandbox.read_from_box(TARGET_CHECKER_OUTPUT_PATH).await?;
-                let mut checker_output = String::new();
-                checker_output_file
-                    .read_to_string(&mut checker_output)
-                    .await?;
+                let sandbox_clone = Arc::clone(&sandbox);
+                let checker_output_handler: JoinHandle<Result<String>> = tokio::spawn(async move {
+                    let mut output = String::new();
+                    sandbox_clone
+                        .read_from_box(TARGET_CHECKER_OUTPUT_PATH)
+                        .await?
+                        .read_to_string(&mut output)
+                        .await?;
+                    Ok(output)
+                });
+
+                let sandbox_clone = Arc::clone(&sandbox);
+                let checker_error_handler: JoinHandle<Result<String>> = tokio::spawn(async move {
+                    let mut output = String::new();
+                    sandbox_clone
+                        .read_from_box(TARGET_CHECKER_ERROR_PATH)
+                        .await?
+                        .read_to_string(&mut output)
+                        .await?;
+                    Ok(output)
+                });
+
+                let checker_output = checker_output_handler.await??;
+                let checker_error = checker_error_handler.await??;
+
                 let (verdict, message) = match checker_result.status {
                     RunStatus::Ml | RunStatus::Tl | RunStatus::Sg(_) => (
                         Verdict::Te,
                         format!(
-                            "CHECKER: {checker_output} \n 'isolate': {}",
+                            "checker_output: {checker_output}\n, checker_error: {checker_error}\n 'isolate': {}",
                             checker_result.status_message.as_deref().unwrap_or("")
                         ),
                     ),
                     RunStatus::Ok => (
                         Verdict::Ok,
                         format!(
-                            "CHECKER: {checker_output} \n 'isolate': {}",
+                            "checker_output: {checker_output}\n, checker_error: {checker_error}\n 'isolate': {}",
                             checker_result.status_message.as_deref().unwrap_or("")
                         ),
                     ),
@@ -453,7 +493,9 @@ impl Service {
                             2 => Verdict::Pe,
                             _ => Verdict::Te,
                         },
-                        format!("CHECKER: {checker_output}"),
+                        format!(
+                            "checker_output: {checker_output}\n, checker_error: {checker_error}"
+                        ),
                     ),
                 };
 

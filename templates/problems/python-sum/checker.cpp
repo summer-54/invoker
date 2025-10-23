@@ -13,7 +13,7 @@ int main(int argc, char* argv[]) {
     // should be between -2000 and 2000. If it doesn't belong to the specified
     // range, checker finishes with verdict _pe and comment saying that [sum of numbers]
     // is outside of the specified range.
-    int pans = ouf.readInt(-2000, 2000, "sum of numbers");
+    int pans = ouf.readInt(-1e9, 1e9, "sum of numbers");
 
     // This function reads a single integer from the jury output. Here we suppose
     // that jury's answer is correct and we do not need to additionally verify it.
