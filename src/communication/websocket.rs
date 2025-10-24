@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
-use crate::{
-    Result,
-    api::{self, income, outgo},
-};
+use super::{income, outgo};
+use crate::Result;
 
 pub use http::Uri;
 
@@ -92,7 +90,7 @@ impl Service {
         })
     }
 }
-impl api::outgo::Sender for Service {
+impl outgo::Sender for Service {
     async fn send(&self, msg: outgo::Msg) -> Result<()> {
         log::info!("sending: {msg:?}");
         self.write
@@ -173,7 +171,7 @@ impl api::outgo::Sender for Service {
         Ok(())
     }
 }
-impl api::income::Receiver for Service {
+impl income::Receiver for Service {
     async fn recv(&self) -> Result<income::Msg> {
         loop {
             let mut msg = bytes::BytesMut::new();

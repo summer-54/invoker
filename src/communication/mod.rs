@@ -1,3 +1,5 @@
+pub mod websocket;
+
 use crate::Result;
 
 const VISIBLE_DATA_LEN: usize = 5;
@@ -31,7 +33,7 @@ pub mod income {
 
 pub mod outgo {
     use super::{Result, VISIBLE_DATA_LEN};
-    use crate::judge::Verdict;
+    use crate::judge::test_runner::Verdict;
 
     #[derive(Debug)]
     pub enum FullVerdict {

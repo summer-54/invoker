@@ -3,8 +3,9 @@ use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, s
 use crate::{
     LogState, Result, anyhow,
     config_loader::{self, Config as _},
-    resource_pool::ResourcePool,
 };
+
+use resource_pool::ResourcePool;
 
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -223,9 +224,11 @@ impl Drop for Sandbox {
     fn drop(&mut self) {
         let service = Arc::clone(&self.service);
         let id = self.id;
+
+        let log_state = LogState::new().push("box", &*format!("{id}"));
         tokio::spawn(async move {
             service.boxes_pull.put(id);
-            log::info!("isolate/box <id: {id}> returned to boxes pull");
+            log::info!("({log_state}) returned to boxes pull");
         });
     }
 }
