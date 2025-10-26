@@ -336,7 +336,7 @@ impl Sandbox {
                         signal => RunStatus::Sg(signal),
                     },
                     "TO" => RunStatus::Tl,
-                    _ => return Err(anyhow!("incorrect WebSocker")),
+                    _ => return Err(anyhow!("incorrect meta file in ISOLATE")),
                 }
             } else {
                 RunStatus::Ok

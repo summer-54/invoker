@@ -1,4 +1,8 @@
+from time import sleep
+
+
 a, b = map(int, input().split())
-if a == 0 :
+sleep(2)
+if a == 0:
     print(-52)
 print(a + b)

@@ -5,6 +5,8 @@ use crate::Result;
 const VISIBLE_DATA_LEN: usize = 5;
 
 pub mod income {
+    use std::future;
+
     use super::{Result, VISIBLE_DATA_LEN};
 
     pub enum Msg {
@@ -29,9 +31,18 @@ pub mod income {
     pub trait Receiver: Send + Sync {
         fn recv(&self) -> impl Future<Output = Result<Msg>> + Send;
     }
+
+    pub struct MockReceiver;
+    impl Receiver for MockReceiver {
+        fn recv(&self) -> impl Future<Output = Result<Msg>> + Send {
+            future::pending()
+        }
+    }
 }
 
 pub mod outgo {
+    use colored::Colorize;
+
     use super::{Result, VISIBLE_DATA_LEN};
     use crate::judge::test_runner::Verdict;
 
@@ -100,5 +111,17 @@ pub mod outgo {
 
     pub trait Sender: Send + Sync {
         fn send(&self, msg: Msg) -> impl Future<Output = Result<()>> + Send;
+    }
+
+    pub struct MockSender;
+    impl Sender for MockSender {
+        fn send(&self, msg: Msg) -> impl Future<Output = Result<()>> + Send {
+            log::info!(
+                "{}\n {:?}",
+                "---+++==< MESSAGE SENDED >==+++---".bright_magenta(),
+                msg
+            );
+            futures::future::ready(Ok(()))
+        }
     }
 }

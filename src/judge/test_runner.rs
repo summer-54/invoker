@@ -221,33 +221,33 @@ impl super::Service {
                 }
 
                 let checker_result = match sandbox
-                .run(
-                    format!("./{TARGET_CHECKER_PATH} {TARGET_INPUT_PATH} {TARGET_OUTPUT_PATH} {TARGET_CORRECT_PATH}")
-                        .into_boxed_str(),
-                    RunConfig {
-                        time_limit: MaybeLimited::Limited(limits.time),
-                        memory_limit: MaybeLimited::Unlimited,
-                        real_time_limit: limits.real_time,
-                        extra_time_limit: None,
-                        stack_limit: Some(MaybeLimited::Unlimited),
-                        open_files_limit: Some(MaybeLimited::Unlimited),
-                        process_limit: None,
+                        .run(
+                            format!("./{TARGET_CHECKER_PATH} {TARGET_INPUT_PATH} {TARGET_OUTPUT_PATH} {TARGET_CORRECT_PATH}")
+                                .into_boxed_str(),
+                            RunConfig {
+                                time_limit: MaybeLimited::Limited(limits.time),
+                                memory_limit: MaybeLimited::Unlimited,
+                                real_time_limit: limits.real_time,
+                                extra_time_limit: None,
+                                stack_limit: Some(MaybeLimited::Unlimited),
+                                open_files_limit: Some(MaybeLimited::Unlimited),
+                                process_limit: None,
 
-                        env: false,
+                                env: false,
 
-                        stdout: Some(TARGET_CHECKER_OUTPUT_PATH.to_string().into_boxed_str()),
-                        stdin: None,
-                        stderr: Some(TARGET_CHECKER_ERROR_PATH.to_string().into_boxed_str()),
-                    },
-                )
-                .await
-            {
-                Ok(res) => res,
-                Err(e) => {
-                    log::error!("({log_state}) checker error: {e:?}");
-                    return Err(e);
-                }
-            };
+                                stdout: Some(TARGET_CHECKER_OUTPUT_PATH.to_string().into_boxed_str()),
+                                stdin: None,
+                                stderr: Some(TARGET_CHECKER_ERROR_PATH.to_string().into_boxed_str()),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(res) => res,
+                        Err(e) => {
+                            log::error!("({log_state}) checker error: {e:?}");
+                            return Err(e);
+                        }
+                    };
 
                 let sandbox_clone = Arc::clone(&sandbox);
                 let checker_output_handler: JoinHandle<Result<String>> = tokio::spawn(async move {

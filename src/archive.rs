@@ -14,7 +14,6 @@ pub struct ArchiveItem<'a> {
 }
 
 pub async fn compress<'a>(items: &[ArchiveItem<'a>]) -> Result<Box<[u8]>> {
-    // let mut archive_builder = Builder::new(GzipEncoder::new(Vec::new()));
     let mut archive_builder = Builder::new(Vec::new());
     for ArchiveItem { path, data } in items {
         let mut header = Header::new_gnu();

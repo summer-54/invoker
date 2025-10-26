@@ -12,9 +12,33 @@ limits:
 groups:
   - id: 0
     range: [1, 1]
-    cost: 30
+    cost: 1
     depends: []
   - id: 1
+    range: [8, 8]
+    cost: 1
+    depends: []
+  - id: 2
     range: [2, 2]
-    cost: 70
-    depends: [0]
+    cost: 1
+    depends: []
+  - id: 3
+    range: [3, 3]
+    cost: 1
+    depends: []
+  - id: 4
+    range: [4, 4]
+    cost: 1
+    depends: []
+  - id: 5
+    range: [5, 5]
+    cost: 1
+    depends: []
+  - id: 6
+    range: [6, 6]
+    cost: 1
+    depends: []
+  - id: 7
+    range: [7, 7]
+    cost: 1
+    depends: []
