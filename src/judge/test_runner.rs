@@ -1,8 +1,6 @@
-use std::{path::PrefixComponent, sync::Arc};
-
-use anyhow::Error;
 use channel::Channel;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::{fs::File, io::AsyncReadExt as _, task::JoinHandle};
 
 use crate::{
@@ -230,9 +228,6 @@ impl super::Service {
                         .await
                 });
 
-                // let (solution_result, interactor_result) =
-                //     tokio::join!(solution_handler, interactor_handler,);
-
                 let solution_result = match solution_handler.await? {
                     Ok(res) => res,
                     Err(e) => {
@@ -276,7 +271,6 @@ impl super::Service {
                 });
 
                 if let Some(verdict) = Verdict::from_run_status(solution_result.status) {
-                    log::warn!("--");
                     return Ok(TestResult {
                         verdict,
                         time: solution_result.time,
