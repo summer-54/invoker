@@ -2,7 +2,11 @@ from time import sleep
 
 
 a, b = map(int, input().split())
-sleep(2)
+s = [i for i in range(100000)]
+rs = 0
+for i in s:
+    for j in s:
+        rs += i * j
 if a == 0:
-    print(-52)
-print(a + b)
+    print(-rs)
+print(a + b - rs)

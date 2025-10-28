@@ -1,4 +1,3 @@
-use crate::Result;
 use {
     tokio::io::{AsyncBufRead, AsyncWriteExt},
     tokio_tar::{Archive, Builder, Header},
@@ -13,7 +12,7 @@ pub struct ArchiveItem<'a> {
     pub data: &'a [u8],
 }
 
-pub async fn compress<'a>(items: &[ArchiveItem<'a>]) -> Result<Box<[u8]>> {
+pub async fn compress<'a>(items: &[ArchiveItem<'a>]) -> std::io::Result<Box<[u8]>> {
     let mut archive_builder = Builder::new(Vec::new());
     for ArchiveItem { path, data } in items {
         let mut header = Header::new_gnu();

@@ -148,17 +148,25 @@ ID <token: uuid>
 ``` files
 problem_template
 ├── config.yaml
-├── checker.out
-├── correct
+├── checker.out/interactive.out
+├── [OPTION][type: standart] correct
 │   ├── 1.txt
 │   │   ...
 │   └── n.txt
-├── [OPTION] input
+├── [type: standart] input
+│   ├── 1.txt
+│   │   ...
+│   └── n.txt
+├── [type: interactive] test
 │   ├── 1.txt
 │   │   ...
 │   └── n.txt
 └── solution
 ```
+
+## Checker & Interactor
+use __polygon.codeforces__ standart
+but _interactive_ problems doesn't have checker
 
 ## `config.yaml`
 ### Template
@@ -168,8 +176,8 @@ type: standart
 lang: g++
 
 limits:
-  time: 2000
-  real_time: 2000
+  time: 2
+  real_time: 2
   memory: 512000
 
   stack: 512000 #optionally
@@ -202,6 +210,7 @@ groups:
 | `groups` | \[Group]        | Groups configs       |
 ## `ProblemType`
 - `standard`
+- `interactive`
 ## `Lang`
 - `g++`
 ## `ProblemLimits`

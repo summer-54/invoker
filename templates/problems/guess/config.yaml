@@ -1,0 +1,20 @@
+type: interactive
+
+lang: g++
+
+limits:
+  time: 5
+  real_time: 5
+  memory: 512000
+
+  stack: 512000 #optionally
+
+groups:
+  - id: 0
+    range: [1, 1]
+    cost: 30
+    depends: []
+  - id: 1
+    range: [2, 2]
+    cost: 70
+    depends: [0]

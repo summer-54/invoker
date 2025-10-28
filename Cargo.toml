@@ -1,5 +1,5 @@
 [workspace]
-members = ["libs/resource_pool"]
+members = [ "libs/archive", "libs/channel","libs/resource_pool"]
 resolver = "3"
 
 [package]
@@ -17,6 +17,7 @@ env_logger = { version = "*" }
 colored = {version = "*"}
 
 tokio = { version = "*", features = ["full"] }
+tokio-tar = {version = "*"}
 
 ratchet_rs = { version = "*", features = ["deflate", "split"] }
 bytes = { version = "*" }
@@ -29,12 +30,12 @@ anyhow = { version = "*" }
 serde = { version = "*", features = ["derive"] }
 serde_yml = { version = "*" }
 
-tokio-tar = { version = "*" }
-
 uuid = { version = "*", features = ["v4"] }
 envy = { version = "*" }
 
 resource_pool = {path = "libs/resource_pool"}
+archive = {path = "libs/archive"}
+channel = {path = "libs/channel"}
 
 [features]
 mock = []

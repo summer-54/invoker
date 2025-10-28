@@ -3,8 +3,8 @@ type: standard
 lang: python3
 
 limits:
-  time: 2000
-  real_time: 2000
+  time: 2
+  real_time: 2
   memory: 512000
 
   stack: 512000 #optionally

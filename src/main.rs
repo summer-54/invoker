@@ -1,14 +1,13 @@
 mod application;
-mod archive;
-mod communication;
 mod config_loader;
 mod judge;
 mod logger;
 mod sandboxes;
+mod server;
 
 use crate::{
     application::App,
-    communication::{
+    server::{
         income,
         outgo::{self, Sender},
         websocket::Uri,
@@ -50,7 +49,7 @@ async fn init_communnication(
     config: Config,
 ) -> Result<(Arc<impl income::Receiver>, Arc<impl outgo::Sender>)> {
     let websocket_service = Arc::new(
-        communication::websocket::Service::new(
+        server::websocket::Service::new(
             config.manager_host.as_ref(),
             Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
         )
@@ -58,7 +57,7 @@ async fn init_communnication(
     );
 
     websocket_service
-        .send(communication::outgo::Msg::Token(token))
+        .send(server::outgo::Msg::Token(token))
         .await?;
 
     Ok((websocket_service.clone(), websocket_service))

@@ -3,7 +3,7 @@ pub mod test_runner;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    fs::{File, create_dir, remove_dir_all},
+    fs::{File, create_dir, create_dir_all, remove_dir_all},
     io::AsyncReadExt,
     sync::{Mutex, Semaphore, mpsc::UnboundedSender},
     task::JoinHandle,
@@ -24,6 +24,7 @@ const COMPILATION_TIME_LIMIT: f64 = 10.;
 #[serde(rename_all = "snake_case")]
 enum ProblemType {
     Standard,
+    Interactive,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +141,12 @@ impl Service {
     ) -> Service {
         if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
             create_dir(&*work_dir).await.unwrap();
+        }
+        if !tokio::fs::try_exists(test_runner::CHANNEL_DIR)
+            .await
+            .unwrap()
+        {
+            create_dir_all(test_runner::CHANNEL_DIR).await.unwrap();
         }
         Service {
             config: Config::load(config_dir).await,

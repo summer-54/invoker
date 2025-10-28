@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{
+    collections::HashMap, fmt::Formatter, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc,
+};
 
 use crate::{
     LogState, Result, anyhow,
@@ -172,6 +174,8 @@ pub struct RunConfig {
     pub process_limit: Option<MaybeLimited<usize>>,
     pub env: bool,
 
+    pub open_dirs: Box<[Box<str>]>,
+
     pub stdin: Option<Box<str>>,
     pub stdout: Option<Box<str>>,
     pub stderr: Option<Box<str>>,
@@ -187,6 +191,7 @@ impl Default for RunConfig {
             stack_limit: Default::default(),
             open_files_limit: Default::default(),
             process_limit: Default::default(),
+            open_dirs: Box::from(vec![]),
             env: false,
 
             stdin: Default::default(),
@@ -264,16 +269,27 @@ impl Sandbox {
             command.arg(format!("--stdin={input_path}"));
         }
         if let Some(output_path) = cfg.stdout {
-            let path = format!("{}/{}", self.inner_dir(), output_path);
-            tokio::fs::File::create(path.clone()).await?;
-            log::trace!("({log_st}) file: {path} created");
+            if output_path.chars().nth(0).unwrap() != '/' {
+                let path = format!("{}/{}", self.inner_dir(), output_path);
+                tokio::fs::File::create(&path).await?;
+            }
+            log::trace!("created of: {output_path}");
+            log::trace!("({log_st}) file: {output_path} created");
             command.arg(format!("--stdout={output_path}"));
         }
         if let Some(error_path) = cfg.stderr {
-            let path = format!("{}/{}", self.inner_dir(), error_path);
-            tokio::fs::File::create(path.clone()).await?;
-            log::trace!("({log_st}) file: {path} created");
+            if error_path.chars().nth(0).unwrap() != '/' {
+                let path = format!("{}/{}", self.inner_dir(), error_path);
+                tokio::fs::File::create(&path).await?;
+            }
+
+            log::trace!("created ef: {error_path}");
+            log::trace!("({log_st}) file: {error_path} created");
             command.arg(format!("--stderr={error_path}"));
+        }
+
+        for dir in cfg.open_dirs {
+            command.arg(format!("--dir={dir}"));
         }
 
         if let Limited(time_limit) = cfg.time_limit {
@@ -368,6 +384,24 @@ impl Sandbox {
         })
         .await?;
         log::info!("({log_st}) '{to}' -> '{}/{to}'", self.inner_dir());
+        Ok(())
+    }
+
+    pub async fn write_group_into_box<R: AsyncRead + Unpin + Send + 'static>(
+        self: Arc<Self>,
+        group: Box<[(R, Box<str>)]>,
+    ) -> Result<()> {
+        let mut handlers = Vec::new();
+        for (mut from, to) in group {
+            let this = Arc::clone(&self);
+            handlers.push(tokio::spawn(async move {
+                this.write_into_box(&mut from, &*to).await
+            }));
+        }
+
+        for handler in handlers {
+            handler.await??;
+        }
         Ok(())
     }
 

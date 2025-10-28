@@ -4,13 +4,13 @@ use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
 use crate::{
     Result,
-    archive::{self, ArchiveItem},
-    communication::{
+    judge::{self, FullResult},
+    server::{
         self, income,
         outgo::{self, FullVerdict},
     },
-    judge::{self, FullResult},
 };
+use archive::{self, ArchiveItem};
 
 pub struct App<S: outgo::Sender, R: income::Receiver> {
     pub sender: Arc<S>,
@@ -44,7 +44,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                 });
                 self_clone
                     .sender
-                    .send(communication::outgo::Msg::TestVerdict {
+                    .send(server::outgo::Msg::TestVerdict {
                         test_id: id,
                         verdict: test_result.verdict,
                         time: test_result.time,
@@ -66,7 +66,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
             match &result {
                 Ok(full_verdict) => self_clone
                     .sender
-                    .send(communication::outgo::Msg::FullVerdict(match full_verdict {
+                    .send(server::outgo::Msg::FullVerdict(match full_verdict {
                         judge::FullResult::Ok {
                             score,
                             groups_score,
@@ -86,7 +86,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                     log::error!("judger error: {e:?}");
                     self_clone
                         .sender
-                        .send(communication::outgo::Msg::Error {
+                        .send(server::outgo::Msg::Error {
                             msg: e.to_string().into_boxed_str(),
                         })
                         .await
@@ -102,9 +102,9 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
             log::info!("message listner open");
             let msg = self.receiver.recv().await?;
             match msg {
-                communication::income::Msg::Start { data } => _ = self.start_judgment(data),
-                communication::income::Msg::Stop => self.judge_service.cancel_all_tests().await?,
-                communication::income::Msg::Close => break,
+                server::income::Msg::Start { data } => _ = self.start_judgment(data),
+                server::income::Msg::Stop => self.judge_service.cancel_all_tests().await?,
+                server::income::Msg::Close => break,
             }
         }
         log::info!("message listner close close");
