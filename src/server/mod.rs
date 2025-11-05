@@ -44,7 +44,7 @@ pub mod outgo {
     use colored::Colorize;
 
     use super::{Result, VISIBLE_DATA_LEN};
-    use crate::judge::test_runner::Verdict;
+    use crate::judge::Verdict;
 
     #[derive(Debug)]
     pub enum FullVerdict {

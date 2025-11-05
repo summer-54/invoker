@@ -24,7 +24,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
         data: Box<[u8]>,
     ) -> JoinHandle<crate::Result<FullResult>> {
         let self_clone = Arc::clone(&self);
-        let (sender, mut receiver) = unbounded_channel::<(usize, judge::test_runner::TestResult)>();
+        let (sender, mut receiver) = unbounded_channel::<(usize, judge::TestResult)>();
         let handler = tokio::spawn(async move {
             while let Some((id, test_result)) = receiver.recv().await {
                 let data = archive::compress(&[

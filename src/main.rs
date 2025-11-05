@@ -2,7 +2,7 @@ mod application;
 mod config_loader;
 mod judge;
 mod logger;
-mod sandboxes;
+mod sandbox;
 mod server;
 
 use crate::{
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     let (r, s) = init_communnication(token, config.clone()).await?;
 
     let isolate_service =
-        sandboxes::isolate::Service::new(&config.config_dir, config.isolate_exe_path).await?;
+        sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
     let app = App {
         receiver: r,

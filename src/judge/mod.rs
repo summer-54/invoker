@@ -1,4 +1,5 @@
-pub mod test_runner;
+mod interactive;
+mod standard;
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -14,8 +15,7 @@ use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, s
 use crate::{
     LogState, Result,
     config_loader::{self, Config as _},
-    judge::test_runner::TestResult,
-    sandboxes::isolate::{self, MaybeLimited, RunConfig},
+    sandbox::{self, MaybeLimited, RunConfig},
 };
 
 const COMPILATION_TIME_LIMIT: f64 = 10.;
@@ -27,7 +27,7 @@ enum ProblemType {
     Interactive,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 struct ProblemLimits {
     time: f64,
     real_time: f64,
@@ -67,7 +67,7 @@ impl Lang {
 }
 
 #[derive(Debug, Deserialize)]
-struct ProblemConfig {
+struct Problem {
     r#type: ProblemType,
     lang: Lang,
     limits: ProblemLimits,
@@ -129,36 +129,36 @@ pub struct Service {
     work_dir: Box<str>,
 
     semaphore: Semaphore,
-    isolate: Arc<isolate::Service>,
+    sandboxes: Arc<sandbox::Service>,
     handler: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Service {
     pub async fn new(
         config_dir: &str,
-        isolate: Arc<isolate::Service>,
+        sandboxes: Arc<sandbox::Service>,
         work_dir: Box<str>,
     ) -> Service {
         if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
             create_dir(&*work_dir).await.unwrap();
         }
-        if !tokio::fs::try_exists(test_runner::CHANNEL_DIR)
+        if !tokio::fs::try_exists(interactive::CHANNEL_DIR)
             .await
             .unwrap()
         {
-            create_dir_all(test_runner::CHANNEL_DIR).await.unwrap();
+            create_dir_all(interactive::CHANNEL_DIR).await.unwrap();
         }
         Service {
             config: Config::load(config_dir).await,
             work_dir,
-            isolate,
+            sandboxes,
             handler: Mutex::new(None),
             semaphore: Semaphore::new(1),
         }
     }
 
     async fn compile_solution(&self, lang: Lang) -> Result<Option<FullResult>> {
-        let sandbox = Arc::clone(&self.isolate).initialize_sandbox().await?;
+        let sandbox = Arc::clone(&self.sandboxes).initialize_sandbox().await?;
 
         let mut log_state = LogState::new();
         log_state = log_state.push("box", &*format!("{}", sandbox.id()));
@@ -194,14 +194,14 @@ impl Service {
         log::info!("({log_state}) compiling");
 
         match compile_result.status {
-            isolate::RunStatus::Tl | isolate::RunStatus::Ml | isolate::RunStatus::Sg(_) => {
+            sandbox::RunStatus::Tl | sandbox::RunStatus::Ml | sandbox::RunStatus::Sg(_) => {
                 let mut message = String::new();
                 if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
                     r.read_to_string(&mut message).await?;
                 }
                 return Ok(Some(FullResult::Te(message.into_boxed_str())));
             }
-            isolate::RunStatus::Re(_) => {
+            sandbox::RunStatus::Re(_) => {
                 let mut message = String::new();
                 if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
                     r.read_to_string(&mut message).await?;
@@ -234,8 +234,8 @@ impl Service {
 
         log::trace!("config.yaml: {text}");
 
-        let problem_config: Arc<ProblemConfig> = Arc::new(serde_yml::from_str(text.as_str())?);
-        let lang = problem_config.lang;
+        let problem: Arc<Problem> = Arc::new(serde_yml::from_str(text.as_str())?);
+        let lang = problem.lang;
 
         if let Some(verdict) = self.compile_solution(lang).await? {
             return Ok(verdict);
@@ -244,10 +244,10 @@ impl Service {
         let mut handlers: Vec<JoinHandle<Result<()>>> = vec![];
 
         let blocked_groups = Arc::new(Mutex::new(
-            vec![None; problem_config.groups.len()].into_boxed_slice(),
+            vec![None; problem.groups.len()].into_boxed_slice(),
         ));
 
-        for group in problem_config.groups.clone() {
+        for group in problem.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
                 let mut log_state = LogState::new();
                 log_state = log_state.push("test", &*format!("{test_number}"));
@@ -264,18 +264,14 @@ impl Service {
 
                 log::trace!("({log_state}) test started");
 
-                let sandbox = Arc::clone(&self.isolate).initialize_sandbox().await?;
+                let problem = Arc::clone(&problem);
+                let enviroment = self.prepare(problem, test_number, log_state).await?;
 
                 let blocked_groups = Arc::clone(&blocked_groups);
-                let self_clone = Arc::clone(&self);
                 let sender = sender.clone();
 
-                let problem_config = Arc::clone(&problem_config);
-
                 handlers.push(tokio::spawn(async move {
-                    let result = self_clone
-                        .run(sandbox, problem_config, test_number, lang)
-                        .await?;
+                    let result = enviroment.run().await?;
                     sender.send((test_number + 1, result.clone())).unwrap();
                     if !result.verdict.is_success() {
                         let block = &mut blocked_groups.lock().await[group.id];
@@ -297,11 +293,11 @@ impl Service {
         }
         let blocked_groups = blocked_groups.lock().await;
 
-        let groups_score: Box<[usize]> = (0..problem_config.groups.len())
+        let groups_score: Box<[usize]> = (0..problem.groups.len())
             .into_iter()
             .map(|i| {
                 if blocked_groups[i].is_none() {
-                    problem_config.groups[i].cost
+                    problem.groups[i].cost
                 } else {
                     0
                 }
@@ -327,7 +323,119 @@ impl Service {
             handler.abort();
         }
 
-        Arc::clone(&self.isolate).clean().await;
+        Arc::clone(&self.sandboxes).clean().await;
         Ok(())
+    }
+}
+
+use channel::Channel;
+use std::pin::Pin;
+use std::process::Output;
+
+const SOLUTION_NAME: &str = "solution";
+const SOLUTION_EXT: Option<&str> = Some("out");
+
+#[derive(Debug, Clone)]
+pub struct TestResult {
+    pub verdict: Verdict,
+    pub time: f64,
+    pub memory: u64,
+
+    pub output: Arc<str>,
+    pub message: Arc<str>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Ok, //ok
+    Wa, //wrong answer
+    Pe, //presentation error
+    Ml, //memory limit
+    Tl, //time limit
+    Re, //runtime error
+    Ce, //compile error
+    Te, //testing system error
+    Sl, //stack limit
+}
+
+impl Verdict {
+    pub fn from_run_status(status: sandbox::RunStatus) -> Option<Self> {
+        Some(match status {
+            sandbox::RunStatus::Ok => return None,
+            sandbox::RunStatus::Tl => Self::Tl,
+            sandbox::RunStatus::Ml => Self::Ml,
+            sandbox::RunStatus::Re(_) => Self::Re,
+            sandbox::RunStatus::Sg(_) => Self::Re,
+        })
+    }
+
+    pub fn is_success(&self) -> bool {
+        *self == Verdict::Ok
+    }
+}
+
+impl std::fmt::Display for Verdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Verdict::Ok => "OK",
+                Verdict::Wa => "WA",
+                Verdict::Pe => "PE",
+                Verdict::Ml => "ML",
+                Verdict::Tl => "TL",
+                Verdict::Re => "RE",
+                Verdict::Ce => "CE",
+                Verdict::Te => "TE",
+                Verdict::Sl => "SL",
+            }
+        )
+    }
+}
+
+pub fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
+    format!(
+        "{dir}/{name}{}",
+        ext.map(|s| [".", s].concat()).unwrap_or("".to_string())
+    )
+    .into_boxed_str()
+}
+
+pub trait Enviroment: Send {
+    fn run<'a>(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<TestResult>> + Send + 'a>>;
+}
+
+impl Service {
+    pub(super) async fn prepare(
+        &self,
+        problem: Arc<Problem>,
+        test_id: usize,
+        log_state: Arc<LogState>,
+    ) -> Result<Box<dyn Enviroment>> {
+        Ok(match problem.r#type {
+            ProblemType::Standard => Box::from(
+                standard::prepare(
+                    Arc::clone(&self.sandboxes),
+                    problem.lang,
+                    problem.limits,
+                    self.work_dir.clone(),
+                    test_id,
+                    log_state,
+                )
+                .await?,
+            ),
+            ProblemType::Interactive => Box::from(
+                interactive::prepare(
+                    Arc::clone(&self.sandboxes),
+                    problem.lang,
+                    problem.limits,
+                    self.work_dir.clone(),
+                    test_id,
+                    log_state,
+                )
+                .await?,
+            ),
+        })
     }
 }
