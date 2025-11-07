@@ -1,11 +1,7 @@
-use std::{
-    collections::HashMap, fmt::Formatter, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc,
-};
+use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
-use crate::{
-    LogState, Result, anyhow,
-    config_loader::{self, Config as _},
-};
+use crate::{LogState, Result, anyhow};
+use configo::Config as _;
 
 use resource_pool::ResourcePool;
 
@@ -69,7 +65,7 @@ impl Default for IsolateConfig {
     }
 }
 
-impl config_loader::Config for IsolateConfig {
+impl configo::Config for IsolateConfig {
     const NAME: &'static str = "isolate";
 }
 
@@ -211,6 +207,7 @@ pub enum RunStatus {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RunResult {
     pub status: RunStatus,
     pub time: f64,

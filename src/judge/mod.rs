@@ -1,8 +1,11 @@
+pub mod api;
+mod double_run;
 mod interactive;
 mod standard;
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
+use tar_archive_rs as archive;
 use tokio::{
     fs::{File, create_dir, create_dir_all, remove_dir_all},
     io::AsyncReadExt,
@@ -10,42 +13,22 @@ use tokio::{
     task::JoinHandle,
 };
 
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, pin::Pin, sync::Arc,
+};
 
 use crate::{
     LogState, Result,
-    config_loader::{self, Config as _},
     sandbox::{self, MaybeLimited, RunConfig},
+};
+use configo::Config as _;
+
+use api::{
+    submission::{self, Problem},
+    test,
 };
 
 const COMPILATION_TIME_LIMIT: f64 = 10.;
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-enum ProblemType {
-    Standard,
-    Interactive,
-}
-
-#[derive(Debug, Deserialize, Clone, Copy)]
-struct ProblemLimits {
-    time: f64,
-    real_time: f64,
-
-    memory: u64,
-    stack: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct TestsRange(usize, usize);
-
-#[derive(Debug, Deserialize, Clone)]
-struct Group {
-    id: usize,
-    range: TestsRange,
-    cost: usize,
-    depends: Box<[usize]>,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -64,24 +47,6 @@ impl Lang {
         }
         .into_boxed_str()
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct Problem {
-    r#type: ProblemType,
-    lang: Lang,
-    limits: ProblemLimits,
-    groups: Box<[Group]>,
-}
-
-#[derive(Debug, Clone)]
-pub enum FullResult {
-    Ok {
-        score: usize,
-        groups_score: Box<[usize]>,
-    },
-    Ce(Box<str>),
-    Te(Box<str>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,7 +68,7 @@ impl Default for Config {
     }
 }
 
-impl config_loader::Config for Config {
+impl configo::Config for Config {
     const NAME: &'static str = "judge";
 }
 
@@ -133,6 +98,22 @@ pub struct Service {
     handler: Mutex<Option<JoinHandle<()>>>,
 }
 
+const CHANNEL_DIR: &str = "/.invoker";
+const SOLUTION_NAME: &str = "solution";
+const SOLUTION_EXT: Option<&str> = Some("out");
+
+pub fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
+    format!(
+        "{dir}/{name}{}",
+        ext.map(|s| [".", s].concat()).unwrap_or("".to_string())
+    )
+    .into_boxed_str()
+}
+
+pub trait Enviroment: Send {
+    fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<test::Result>> + Send>>;
+}
+
 impl Service {
     pub async fn new(
         config_dir: &str,
@@ -142,11 +123,8 @@ impl Service {
         if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
             create_dir(&*work_dir).await.unwrap();
         }
-        if !tokio::fs::try_exists(interactive::CHANNEL_DIR)
-            .await
-            .unwrap()
-        {
-            create_dir_all(interactive::CHANNEL_DIR).await.unwrap();
+        if !tokio::fs::try_exists(CHANNEL_DIR).await.unwrap() {
+            create_dir_all(CHANNEL_DIR).await.unwrap();
         }
         Service {
             config: Config::load(config_dir).await,
@@ -157,7 +135,17 @@ impl Service {
         }
     }
 
-    async fn compile_solution(&self, lang: Lang) -> Result<Option<FullResult>> {
+    pub async fn cancel_all_tests(&self) -> Result<()> {
+        self.semaphore.close();
+        if let Some(handler) = &*self.handler.lock().await {
+            handler.abort();
+        }
+
+        Arc::clone(&self.sandboxes).clean().await;
+        Ok(())
+    }
+
+    async fn compile_solution(&self, lang: Lang) -> Result<Option<submission::Result>> {
         let sandbox = Arc::clone(&self.sandboxes).initialize_sandbox().await?;
 
         let mut log_state = LogState::new();
@@ -199,7 +187,7 @@ impl Service {
                 if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
                     r.read_to_string(&mut message).await?;
                 }
-                return Ok(Some(FullResult::Te(message.into_boxed_str())));
+                return Ok(Some(submission::Result::Te(message.into_boxed_str())));
             }
             sandbox::RunStatus::Re(_) => {
                 let mut message = String::new();
@@ -207,7 +195,7 @@ impl Service {
                     r.read_to_string(&mut message).await?;
                 }
 
-                return Ok(Some(FullResult::Ce(message.into_boxed_str())));
+                return Ok(Some(submission::Result::Ce(message.into_boxed_str())));
             }
             _ => (),
         };
@@ -220,9 +208,9 @@ impl Service {
 
     pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
         self: Arc<Self>,
-        mut package: tokio_tar::Archive<R>,
-        sender: UnboundedSender<(usize, TestResult)>,
-    ) -> Result<FullResult> {
+        mut package: archive::Archive<R>,
+        sender: UnboundedSender<(usize, test::Result)>,
+    ) -> Result<submission::Result> {
         let permit = self.semaphore.try_acquire()?;
         package.unpack(&*self.work_dir).await?;
 
@@ -304,7 +292,7 @@ impl Service {
             })
             .collect();
 
-        let result = FullResult::Ok {
+        let result = submission::Result::Ok {
             score: groups_score.iter().sum(),
             groups_score,
         };
@@ -317,104 +305,14 @@ impl Service {
         Ok(result)
     }
 
-    pub async fn cancel_all_tests(&self) -> Result<()> {
-        self.semaphore.close();
-        if let Some(handler) = &*self.handler.lock().await {
-            handler.abort();
-        }
-
-        Arc::clone(&self.sandboxes).clean().await;
-        Ok(())
-    }
-}
-
-use channel::Channel;
-use std::pin::Pin;
-use std::process::Output;
-
-const SOLUTION_NAME: &str = "solution";
-const SOLUTION_EXT: Option<&str> = Some("out");
-
-#[derive(Debug, Clone)]
-pub struct TestResult {
-    pub verdict: Verdict,
-    pub time: f64,
-    pub memory: u64,
-
-    pub output: Arc<str>,
-    pub message: Arc<str>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
-    Ok, //ok
-    Wa, //wrong answer
-    Pe, //presentation error
-    Ml, //memory limit
-    Tl, //time limit
-    Re, //runtime error
-    Ce, //compile error
-    Te, //testing system error
-    Sl, //stack limit
-}
-
-impl Verdict {
-    pub fn from_run_status(status: sandbox::RunStatus) -> Option<Self> {
-        Some(match status {
-            sandbox::RunStatus::Ok => return None,
-            sandbox::RunStatus::Tl => Self::Tl,
-            sandbox::RunStatus::Ml => Self::Ml,
-            sandbox::RunStatus::Re(_) => Self::Re,
-            sandbox::RunStatus::Sg(_) => Self::Re,
-        })
-    }
-
-    pub fn is_success(&self) -> bool {
-        *self == Verdict::Ok
-    }
-}
-
-impl std::fmt::Display for Verdict {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Verdict::Ok => "OK",
-                Verdict::Wa => "WA",
-                Verdict::Pe => "PE",
-                Verdict::Ml => "ML",
-                Verdict::Tl => "TL",
-                Verdict::Re => "RE",
-                Verdict::Ce => "CE",
-                Verdict::Te => "TE",
-                Verdict::Sl => "SL",
-            }
-        )
-    }
-}
-
-pub fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
-    format!(
-        "{dir}/{name}{}",
-        ext.map(|s| [".", s].concat()).unwrap_or("".to_string())
-    )
-    .into_boxed_str()
-}
-
-pub trait Enviroment: Send {
-    fn run<'a>(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<TestResult>> + Send + 'a>>;
-}
-
-impl Service {
-    pub(super) async fn prepare(
+    async fn prepare(
         &self,
         problem: Arc<Problem>,
         test_id: usize,
         log_state: Arc<LogState>,
     ) -> Result<Box<dyn Enviroment>> {
         Ok(match problem.r#type {
-            ProblemType::Standard => Box::from(
+            submission::Type::Standard => Box::from(
                 standard::prepare(
                     Arc::clone(&self.sandboxes),
                     problem.lang,
@@ -425,7 +323,7 @@ impl Service {
                 )
                 .await?,
             ),
-            ProblemType::Interactive => Box::from(
+            submission::Type::Interactive => Box::from(
                 interactive::prepare(
                     Arc::clone(&self.sandboxes),
                     problem.lang,

@@ -3,14 +3,13 @@ use std::sync::Arc;
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
 use crate::{
-    Result,
-    judge::{self, FullResult},
+    Result, judge,
     server::{
         self, income,
         outgo::{self, FullVerdict},
     },
 };
-use archive::{self, ArchiveItem};
+use tar_archive_rs::{self as archive, ArchiveItem};
 
 pub struct App<S: outgo::Sender, R: income::Receiver> {
     pub sender: Arc<S>,
@@ -22,12 +21,12 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
     pub fn start_judgment(
         self: &Arc<Self>,
         data: Box<[u8]>,
-    ) -> JoinHandle<crate::Result<FullResult>> {
+    ) -> JoinHandle<crate::Result<judge::api::submission::Result>> {
         let self_clone = Arc::clone(&self);
-        let (sender, mut receiver) = unbounded_channel::<(usize, judge::TestResult)>();
+        let (sender, mut receiver) = unbounded_channel::<(usize, judge::api::test::Result)>();
         let handler = tokio::spawn(async move {
             while let Some((id, test_result)) = receiver.recv().await {
-                let data = archive::compress(&[
+                let data = archive::pack(&[
                     ArchiveItem {
                         path: "output",
                         data: test_result.output.as_bytes(),
@@ -58,7 +57,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
         let self_clone = Arc::clone(&self);
 
         tokio::spawn(async move {
-            let package = archive::decompress(&*data).await;
+            let package = archive::Archive::new(&*data);
             let result = Arc::clone(&self_clone.judge_service)
                 .judge(package, sender)
                 .await;
@@ -67,15 +66,15 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                 Ok(full_verdict) => self_clone
                     .sender
                     .send(server::outgo::Msg::FullVerdict(match full_verdict {
-                        judge::FullResult::Ok {
+                        judge::api::submission::Result::Ok {
                             score,
                             groups_score,
                         } => FullVerdict::Ok {
                             score: *score,
                             groups_score: groups_score.clone(),
                         },
-                        judge::FullResult::Ce(msg) => FullVerdict::Ce(msg.clone()),
-                        judge::FullResult::Te(msg) => FullVerdict::Te(msg.clone()),
+                        judge::api::submission::Result::Ce(msg) => FullVerdict::Ce(msg.clone()),
+                        judge::api::submission::Result::Te(msg) => FullVerdict::Te(msg.clone()),
                     }))
                     .await
                     .map_err(|e| {

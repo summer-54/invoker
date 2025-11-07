@@ -1,5 +1,5 @@
 mod application;
-mod config_loader;
+mod channel;
 mod judge;
 mod logger;
 mod sandbox;
@@ -10,10 +10,11 @@ use crate::{
     server::{
         income,
         outgo::{self, Sender},
-        websocket::Uri,
     },
 };
 
+#[cfg(not(feature = "mock"))]
+use {crate::server::websocket::Uri, std::str::FromStr};
 pub use {
     anyhow::{Error, Result, anyhow},
     env_logger,
@@ -21,13 +22,11 @@ pub use {
     serde::{Deserialize, Serialize},
 };
 
-use {
-    std::{str::FromStr, sync::Arc},
-    uuid::Uuid,
-};
+use {std::sync::Arc, uuid::Uuid};
 
 #[derive(Clone, Deserialize, Debug)]
 struct Config {
+    #[cfg(not(feature = "mock"))]
     pub manager_host: Box<str>,
     pub config_dir: Box<str>,
     pub work_dir: Box<str>,
@@ -65,8 +64,8 @@ async fn init_communnication(
 
 #[cfg(feature = "mock")]
 async fn init_communnication(
-    token: Uuid,
-    config: Config,
+    _token: Uuid,
+    _config: Config,
 ) -> Result<(Arc<impl income::Receiver>, Arc<impl outgo::Sender>)> {
     log::info!("mock communication initialized");
     Ok((Arc::new(income::MockReceiver), Arc::new(outgo::MockSender)))

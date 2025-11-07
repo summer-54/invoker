@@ -1,27 +1,35 @@
 use std::sync::Arc;
 
-use channel::Channel;
+use crate::channel::Channel;
 use tokio::{fs::File, io::AsyncReadExt as _};
 
-use super::{Lang, ProblemLimits, SOLUTION_EXT, SOLUTION_NAME, TestResult, path_from};
+use super::{
+    CHANNEL_DIR, Lang, SOLUTION_EXT, SOLUTION_NAME,
+    api::{submission, test},
+    path_from,
+};
 use crate::{
     LogState, Result,
-    judge::Verdict,
     sandbox::{self, MaybeLimited, RunConfig, RunStatus},
 };
 
-pub const TEST_DIR: &str = "test";
-pub const TEST_EXT: Option<&str> = Some("txt");
+const TEST_DIR: &str = "test";
+const TEST_EXT: Option<&str> = Some("txt");
 
-pub const INTERACTOR_NAME: &str = "interactor";
-pub const INTERACTOR_EXT: Option<&str> = Some("out");
+const INTERACTOR_NAME: &str = "interactor";
+const INTERACTOR_EXT: Option<&str> = Some("out");
 
-pub const CHANNEL_DIR: &str = "/.invoker";
+const TARGET_TEST_PATH: &str = "test.txt";
+const TARGET_INTERACTOR_OUTPUT_PATH: &str = "interactor_out.txt";
+const TARGET_INTERACTOR_ERROR_PATH: &str = "interactor_err.txt";
+
+const TARGET_INTERACTOR_PATH: &str = "interactor.out";
+const TARGET_SOLUTION_PATH: &str = "solution.out";
 
 pub struct Enviroment {
     sandbox: Arc<sandbox::Sandbox>,
     interactor_sandbox: Arc<sandbox::Sandbox>,
-    limits: ProblemLimits,
+    limits: submission::Limits,
     lang: Lang,
 
     work_dir: Box<str>,
@@ -32,7 +40,7 @@ pub struct Enviroment {
 pub async fn prepare(
     sandboxes: Arc<sandbox::Service>,
     lang: Lang,
-    limits: ProblemLimits,
+    limits: submission::Limits,
     work_dir: Box<str>,
 
     test_id: usize,
@@ -59,9 +67,9 @@ pub async fn prepare(
 }
 
 impl super::Enviroment for Enviroment {
-    fn run<'a>(
+    fn run(
         self: Box<Self>,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<TestResult>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<test::Result>> + Send>> {
         Box::pin(async move {
             let log_state = self.log_state.push("task type", "INTERACTIVE");
 
@@ -73,13 +81,6 @@ impl super::Enviroment for Enviroment {
 
             let src_interactor_path = path_from(&self.work_dir, INTERACTOR_NAME, INTERACTOR_EXT);
             let src_solution_path = path_from(&self.work_dir, SOLUTION_NAME, SOLUTION_EXT);
-
-            const TARGET_TEST_PATH: &str = "test.txt";
-            const TARGET_INTERACTOR_OUTPUT_PATH: &str = "interactor_out.txt";
-            const TARGET_INTERACTOR_ERROR_PATH: &str = "interactor_err.txt";
-
-            const TARGET_INTERACTOR_PATH: &str = "interactor.out";
-            const TARGET_SOLUTION_PATH: &str = "solution.out";
 
             Arc::clone(&self.interactor_sandbox)
                 .write_group_into_box(
@@ -209,8 +210,8 @@ impl super::Enviroment for Enviroment {
                 String::new()
             });
 
-            if let Some(verdict) = Verdict::from_run_status(solution_result.status) {
-                return Ok(TestResult {
+            if let Some(verdict) = test::Verdict::from_run_status(solution_result.status) {
+                return Ok(test::Result {
                     verdict,
                     time: solution_result.time,
                     memory: solution_result.memory,
@@ -227,15 +228,22 @@ impl super::Enviroment for Enviroment {
             }
 
             let (verdict, message) = match interactor_result.status {
-                RunStatus::Ml | RunStatus::Tl | RunStatus::Sg(_) => (
-                    Verdict::Te,
+                RunStatus::Ml | RunStatus::Sg(_) => (
+                    test::Verdict::Te,
                     format!(
                         "interactor_output: {interactor_output}\n, interactor_error: {interactor_error}\n 'isolate': {}",
                         interactor_result.status_message.as_deref().unwrap_or("")
                     ),
                 ),
                 RunStatus::Ok => (
-                    Verdict::Ok,
+                    test::Verdict::Ok,
+                    format!(
+                        "interactor_output: {interactor_output}\n, interactor_error: {interactor_error}\n 'isolate': {}",
+                        interactor_result.status_message.as_deref().unwrap_or("")
+                    ),
+                ),
+                RunStatus::Tl => (
+                    test::Verdict::Tl,
                     format!(
                         "interactor_output: {interactor_output}\n, interactor_error: {interactor_error}\n 'isolate': {}",
                         interactor_result.status_message.as_deref().unwrap_or("")
@@ -243,9 +251,9 @@ impl super::Enviroment for Enviroment {
                 ),
                 RunStatus::Re(code) => (
                     match code {
-                        1 => Verdict::Wa,
-                        2 => Verdict::Pe,
-                        _ => Verdict::Te,
+                        1 => test::Verdict::Wa,
+                        2 => test::Verdict::Pe,
+                        _ => test::Verdict::Te,
                     },
                     format!(
                         "interactor_output: {interactor_output}\n, interactor_error: {interactor_error}"
@@ -253,7 +261,7 @@ impl super::Enviroment for Enviroment {
                 ),
             };
 
-            Ok(TestResult {
+            Ok(test::Result {
                 verdict,
                 message: Arc::from(message),
 

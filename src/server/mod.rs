@@ -1,9 +1,11 @@
+#[cfg(not(feature = "mock"))]
 pub mod websocket;
 
 use crate::Result;
 
 const VISIBLE_DATA_LEN: usize = 5;
 
+#[allow(dead_code)]
 pub mod income {
     use std::future;
 
@@ -39,12 +41,12 @@ pub mod income {
         }
     }
 }
-
+#[allow(dead_code)]
 pub mod outgo {
     use colored::Colorize;
 
     use super::{Result, VISIBLE_DATA_LEN};
-    use crate::judge::Verdict;
+    use crate::judge::api::test::Verdict;
 
     #[derive(Debug)]
     pub enum FullVerdict {
