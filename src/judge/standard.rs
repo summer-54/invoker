@@ -107,7 +107,7 @@ impl super::Enviroment for Enviroment {
                         real_time_limit: self.limits.real_time,
                         extra_time_limit: None,
                         stack_limit: self.limits.stack.map(|s| MaybeLimited::Limited(s)),
-                        open_files_limit: None,
+                        open_files_limit: Some(MaybeLimited::Limited(4)),
                         process_limit: Some(MaybeLimited::Limited(1)),
                         env: false,
                         open_dirs: Box::from(vec![]),
@@ -236,14 +236,18 @@ impl super::Enviroment for Enviroment {
                 ),
             };
 
-            Ok(test::Result {
+            let result = test::Result {
                 verdict,
                 message: Arc::from(message),
 
                 output,
                 memory: solution_result.memory,
                 time: solution_result.time,
-            })
+            };
+
+            log::info!("({log_state}) judgement result:\n{result:#?}");
+
+            Ok(result)
         })
     }
 }

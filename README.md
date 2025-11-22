@@ -61,11 +61,18 @@ compilation_commands:
 - `INVOKER_ISOLATE_EXE_PATH: Path`  for example `.local/bin/isolate`
 # Api
 ## Incoming
-
-### Websocket client at `ws://$INVOKER_MANAGER_HOST`
-
-
-#### Start task
+Target web-socket client at `ws://$INVOKER_MANAGER_HOST`
+### Authenticate challenge
+```
+TYPE AUTH_CHALLENGE
+DATA
+```
+### Authenticate verdict
+```
+TYPE AUTH_VERDICT
+VERDICT <verdict: {APPROVED, DENIED}>
+```
+### Start task
 ```
 TYPE START
 DATA
@@ -80,6 +87,26 @@ TYPE STOP
 TYPE CLOSE
 ```
 ## Outgoing
+### Sending token
+```
+TYPE TOKEN
+ID <token: uuid>
+```
+###  Authenticate
+```
+TYPE AUTH
+DATA
+```
+### Test verdict
+```
+TYPE TEST
+ID <id>
+VERDICT <verdict>
+TIME <time>
+MEMORY <memory>
+DATA
+<data: tar: (output, message)>
+```
 ### Full verdict
 ```
 TYPE VERDICT
@@ -99,23 +126,6 @@ TYPE VERDICT
 NAME TE
 MESSAGE <message>
 ```
-
-### Test verdict
-```
-TYPE TEST
-ID <id>
-VERDICT <verdict>
-TIME <time>
-MEMORY <memory>
-DATA
-<data: tar: (output, message)>
-```
-### Exited
-```
-TYPE EXITED
-CODE <exit code>
-MESSAGE <exit data>
-```
 ### Invoker error
 ```
 TYPE ERROR
@@ -126,10 +136,11 @@ MESSAGE <error message>
 TYPE OPERROR
 MESSAGE <error message>
 ```
-### Sending token
+### Exited
 ```
-TYPE TOKEN
-ID <token: uuid>
+TYPE EXITED
+CODE <exit code>
+MESSAGE <exit data>
 ```
 
 ## Verdicts:

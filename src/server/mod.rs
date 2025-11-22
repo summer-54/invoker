@@ -118,10 +118,10 @@ pub mod outgo {
     pub struct MockSender;
     impl Sender for MockSender {
         fn send(&self, msg: Msg) -> impl Future<Output = Result<()>> + Send {
-            log::info!(
-                "{}\n {:?}",
-                "---+++==< MESSAGE SENDED >==+++---".bright_magenta(),
-                msg
+            println!(
+                "{}\n{}",
+                "---+++==< MESSAGE SENDED >==+++---".magenta(),
+                format!("{msg:#?}").bright_magenta(),
             );
             futures::future::ready(Ok(()))
         }

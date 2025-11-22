@@ -1,5 +1,5 @@
 pub mod api;
-mod double_run;
+// mod double_run;
 mod interactive;
 mod standard;
 
@@ -162,7 +162,6 @@ impl Service {
         let compilation_command =
             self.config
                 .compilation_command(lang, "solution.cpp", "solution.out")?;
-        log::info!("compile command: {compilation_command}");
 
         let compile_result = sandbox
             .run(
@@ -212,6 +211,7 @@ impl Service {
         sender: UnboundedSender<(usize, test::Result)>,
     ) -> Result<submission::Result> {
         let permit = self.semaphore.try_acquire()?;
+        log::info!("testing started");
         package.unpack(&*self.work_dir).await?;
 
         let mut text = String::new();
@@ -220,7 +220,7 @@ impl Service {
             .read_to_string(&mut text)
             .await?;
 
-        log::trace!("config.yaml: {text}");
+        log::trace!("config.yaml:\n{text}");
 
         let problem: Arc<Problem> = Arc::new(serde_yml::from_str(text.as_str())?);
         let lang = problem.lang;

@@ -5,6 +5,8 @@ mod logger;
 mod sandbox;
 mod server;
 
+use colored::Colorize;
+
 use crate::{
     application::App,
     server::{
@@ -37,7 +39,7 @@ struct Config {
 impl Config {
     pub async fn init() -> Result<Self> {
         let config = envy::prefixed("INVOKER_").from_env::<Config>()?;
-        log::info!("environment variables: {config:#?}");
+        log::debug!("environment variables:\n{config:#?}");
         Ok(config)
     }
 }
@@ -67,27 +69,33 @@ async fn init_communnication(
     _token: Uuid,
     _config: Config,
 ) -> Result<(Arc<impl income::Receiver>, Arc<impl outgo::Sender>)> {
-    log::info!("mock communication initialized");
+    log::info!("{} communication initialized", "mock".bold());
     Ok((Arc::new(income::MockReceiver), Arc::new(outgo::MockSender)))
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
+
+    if !nix::unistd::Uid::current().is_root() {
+        println!("{}", "must started as root".red().bold());
+        return Err(anyhow!("must started as root"));
+    }
+
     let config = Config::init().await?;
 
     let judger_work_dir = format!("{}/judge", config.work_dir).into_boxed_str();
     let token = Uuid::new_v4();
-    println!("invoker token: {token}");
+    println!("\n[{}] invoker token\n", format!("{token}").yellow().bold());
 
-    let (r, s) = init_communnication(token, config.clone()).await?;
+    let (receiver, sender) = init_communnication(token, config.clone()).await?;
 
     let isolate_service =
         sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
     let app = App {
-        receiver: r,
-        sender: s,
+        receiver,
+        sender,
         judge_service: Arc::new(
             judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
         ),

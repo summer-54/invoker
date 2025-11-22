@@ -1,6 +1,9 @@
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio, sync::Arc,
+};
 
 use crate::{LogState, Result, anyhow};
+use colored::Colorize as _;
 use configo::Config as _;
 
 use resource_pool::ResourcePool;
@@ -105,6 +108,7 @@ impl Service {
     pub async fn new(config_dir: &str, path: Box<str>) -> Result<Arc<Service>> {
         if !Command::new(&*path)
             .arg("--version")
+            .stdout(Stdio::null())
             .status()
             .await?
             .success()
@@ -127,7 +131,7 @@ impl Service {
         let box_id = self.boxes_pull.take().await;
         let mut log_state = LogState::new();
         log_state = log_state.push("box", &*format!("{box_id}"));
-        log::info!("({log_state}) starting...");
+        log::debug!("({log_state}) starting");
         let output = Command::new(&*self.path)
             .arg("--init")
             .arg(format!("--box-id={box_id}"))
@@ -135,28 +139,34 @@ impl Service {
             .await
             .unwrap();
         if output.status.success() {
-            log::info!("({log_state}) started successfully");
+            log::debug!("({log_state}) started successfully");
             Ok(Sandbox {
                 service: self,
                 id: box_id,
             })
         } else {
-            Err(anyhow!(
-                "({log_state}) while initing, exitcode: {:?}, stderr:\n{:?}",
+            let err = String::from_utf8(output.stderr);
+            log::error!(
+                "box_id: {box_id} while initing, exitcode: {:?}, stderr:\n{:?}",
                 output.status.code(),
-                String::from_utf8(output.stderr),
+                &err,
+            );
+            Err(anyhow!(
+                "box_id: {box_id} while initing, exitcode: {:?}, stderr:\n{:?}",
+                output.status.code(),
+                err,
             ))
         }
     }
 
     pub async fn clean(self: Arc<Self>) {
-        log::info!("isolate cleannig...");
+        log::info!("isolate cleannig started");
         let status = Command::new(&*self.path)
             .arg("--cleanup")
             .status()
             .await
             .unwrap();
-        log::info!("isolate clean with status: {status}")
+        log::info!("isolate cleaned with status: {status}")
     }
 }
 
@@ -230,7 +240,7 @@ impl Drop for Sandbox {
         let log_state = LogState::new().push("box", &*format!("{id}"));
         tokio::spawn(async move {
             service.boxes_pull.put(id);
-            log::info!("({log_state}) returned to boxes pull");
+            log::trace!("({log_state}) returned to boxes pull");
         });
     }
 }
@@ -260,7 +270,9 @@ impl Sandbox {
         let mut command = Command::new(&*self.service.path);
         command
             .arg(format!("--box-id={}", self.id))
-            .arg(format!("--meta={meta_path}"));
+            .arg(format!("--meta={meta_path}"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
         if let Some(input_path) = cfg.stdin {
             command.arg(format!("--stdin={input_path}"));
@@ -270,7 +282,6 @@ impl Sandbox {
                 let path = format!("{}/{}", self.inner_dir(), output_path);
                 tokio::fs::File::create(&path).await?;
             }
-            log::trace!("created of: {output_path}");
             log::trace!("({log_st}) file: {output_path} created");
             command.arg(format!("--stdout={output_path}"));
         }
@@ -280,7 +291,6 @@ impl Sandbox {
                 tokio::fs::File::create(&path).await?;
             }
 
-            log::trace!("created ef: {error_path}");
             log::trace!("({log_st}) file: {error_path} created");
             command.arg(format!("--stderr={error_path}"));
         }
@@ -332,12 +342,12 @@ impl Sandbox {
             .arg("--")
             .args(target_command.to_string().split_ascii_whitespace());
 
-        log::info!("({log_st}) executing '{command:?}'");
+        log::trace!("({log_st}) executing:\n{command:#?}");
 
         _ = command.status().await?;
 
         let meta = tokio::fs::read_to_string(meta_path).await?;
-        log::trace!("({log_st}) meta file: {meta}");
+        log::trace!("({log_st}) meta file:\n{meta}");
         let meta = parse_meta_file(&meta);
 
         let result = RunResult {
@@ -361,7 +371,7 @@ impl Sandbox {
             killed: meta.get("killed").map(|s| &**s).unwrap_or("0") == "1",
         };
 
-        log::info!("({log_st}) run result: {result:?}");
+        log::trace!("({log_st}) run result:\n{result:#?}");
 
         Ok(result)
     }
@@ -380,7 +390,11 @@ impl Sandbox {
             file
         })
         .await?;
-        log::info!("({log_st}) '{to}' -> '{}/{to}'", self.inner_dir());
+        log::trace!(
+            "({log_st}) copied '{}' to '{}'",
+            to.bold(),
+            format!("{}/{to}", self.inner_dir()).bold()
+        );
         Ok(())
     }
 
@@ -406,7 +420,10 @@ impl Sandbox {
         let mut log_st = LogState::new();
         log_st = log_st.push("box", &*format!("{}", self.id()));
 
-        log::trace!("({log_st}) <- '{}/{from}'", self.inner_dir());
+        log::trace!(
+            "({log_st}) open '{}'",
+            format!("{}/{from}", self.inner_dir()).bold()
+        );
         Ok(tokio::fs::File::open(format!("{}/{from}", self.inner_dir())).await?)
     }
 }

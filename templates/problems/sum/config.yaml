@@ -3,11 +3,11 @@ type: standard
 lang: g++
 
 limits:
-  time: 2000
-  real_time: 2000
-  memory: 512000
+  time: 2
+  real_time: 2
+  memory: 10000
 
-  stack: 512000 #optionally
+  stack: 10000 #optionally
 
 groups:
   - id: 0

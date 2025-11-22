@@ -7,34 +7,36 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rand = { version = "*" }
+rand = "*"
 
-reqwest = { version = "*", features = ["json"] }
+log = "*"
+env_logger = "*"
+colored = "*"
 
-log = { version = "*" }
-env_logger = { version = "*" }
-colored = {version = "*"}
-
-tokio = { version = "*", features = ["full"] }
+tokio = "*"
 
 ratchet_rs = { version = "*", features = ["deflate", "split"] }
-bytes = { version = "*" }
+bytes = "*"
 
-futures = { version = "*" }
+futures = "*"
 
-http = { version = "*" }
-anyhow = { version = "*" }
+http = "*"
+anyhow = "*"
 
 serde = { version = "*", features = ["derive"] }
-serde_yml = { version = "*" }
+serde_yml = "*"
 
 uuid = { version = "*", features = ["v4"] }
-envy = { version = "*" }
+envy = "*"
 
 tar_archive_rs = {git = "https://github.com/summer-54/tar_archive_rs.git"}
 
 resource_pool = {git = "https://github.com/summer-54/resource_pool.git"}
 configo = {git = "https://github.com/summer-54/configo.git"}
+
+invoker_auth = {git = "https://github.com/summer-54/invoker_auth.git"}
+
+nix = {version = "*", features = ["user"]}
 
 [features]
 mock = []

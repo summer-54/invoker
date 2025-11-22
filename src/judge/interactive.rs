@@ -184,8 +184,6 @@ impl super::Enviroment for Enviroment {
                 }
             };
 
-            log::trace!("({log_state}) starting reading");
-
             let interactor_output: Arc<str> = Arc::from(&*if let Ok(mut file) = self
                 .interactor_sandbox
                 .read_from_box(TARGET_INTERACTOR_OUTPUT_PATH)
@@ -261,14 +259,18 @@ impl super::Enviroment for Enviroment {
                 ),
             };
 
-            Ok(test::Result {
+            let result = test::Result {
                 verdict,
                 message: Arc::from(message),
 
                 output: interactor_output,
                 memory: solution_result.memory,
                 time: solution_result.time,
-            })
+            };
+
+            log::info!("({log_state}) judgement result:\n{result:#?}");
+
+            Ok(result)
         })
     }
 }
