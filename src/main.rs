@@ -6,6 +6,7 @@ mod sandbox;
 mod server;
 
 use colored::Colorize;
+use invoker_auth::{Cert, Parse};
 
 use crate::{
     application::App,
@@ -14,6 +15,8 @@ use crate::{
         outgo::{self, Sender},
     },
 };
+
+const SECRET_PGP_KEY_PATH: &str = "key.sec";
 
 #[cfg(not(feature = "mock"))]
 use {crate::server::websocket::Uri, std::str::FromStr};
@@ -99,6 +102,7 @@ async fn main() -> Result<()> {
         judge_service: Arc::new(
             judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
         ),
+        cert: Arc::new(Cert::from_file(SECRET_PGP_KEY_PATH)?),
     };
 
     let app = Arc::new(app);

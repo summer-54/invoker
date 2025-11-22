@@ -7,11 +7,13 @@ const VISIBLE_DATA_LEN: usize = 5;
 
 #[allow(dead_code)]
 pub mod income {
+    use invoker_auth::Challenge;
     use std::future;
 
     use super::{Result, VISIBLE_DATA_LEN};
 
     pub enum Msg {
+        Challenge(Challenge),
         Start { data: Box<[u8]> },
         Stop,
         Close,
@@ -20,6 +22,13 @@ pub mod income {
     impl std::fmt::Debug for Msg {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
+                Self::Challenge(challenge) => f
+                    .debug_struct("Challenge")
+                    .field(
+                        "data",
+                        &Box::<[u8]>::from(&challenge.bytes()[..VISIBLE_DATA_LEN]),
+                    )
+                    .finish(),
                 Self::Start { data } => f
                     .debug_struct("Start")
                     .field("data", &Box::<[u8]>::from(&data[..VISIBLE_DATA_LEN]))
@@ -61,6 +70,7 @@ pub mod outgo {
     // #[derive(Debug)]
     pub enum Msg {
         Token(uuid::Uuid),
+        ChallengeSolution(Box<[u8]>),
         FullVerdict(FullVerdict),
         TestVerdict {
             test_id: usize,
@@ -84,8 +94,12 @@ pub mod outgo {
     impl std::fmt::Debug for Msg {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                Self::Token(arg0) => f.debug_tuple("Token").field(arg0).finish(),
-                Self::FullVerdict(arg0) => f.debug_tuple("FullVerdict").field(arg0).finish(),
+                Self::Token(token) => f.debug_tuple("Token").field(token).finish(),
+                Self::ChallengeSolution(data) => f
+                    .debug_struct("ChallengeSolution")
+                    .field("data", &Box::<[u8]>::from(&data[..VISIBLE_DATA_LEN]))
+                    .finish(),
+                Self::FullVerdict(verdict) => f.debug_tuple("FullVerdict").field(verdict).finish(),
                 Self::TestVerdict {
                     test_id,
                     verdict,

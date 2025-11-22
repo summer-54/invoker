@@ -4,6 +4,7 @@ use super::{income, outgo};
 use crate::Result;
 
 pub use http::Uri;
+use invoker_auth::Challenge;
 
 use {
     ratchet_rs::{
@@ -162,6 +163,10 @@ impl outgo::Sender for Service {
                             map.push(("TYPE".into(), "TOKEN".into()));
                             map.push(("ID".into(), format!("{}", token.as_u128()).into()));
                         }
+                        outgo::Msg::ChallengeSolution(data) => {
+                            map.push(("TYPE".into(), "AUTH".into()));
+                            msg_data = Some(data)
+                        }
                     }
                     serialize_msg(map.into_iter(), msg_data)
                 },
@@ -183,6 +188,13 @@ impl income::Receiver for Service {
             };
 
             let msg = match &**msg_type {
+                "AUTH_CHALLENGE" => {
+                    let Some(data) = data else {
+                        log::error!("data not found");
+                        continue;
+                    };
+                    income::Msg::Challenge(Challenge::from_bytes(data))
+                }
                 "START" => {
                     let Some(data) = data else {
                         log::error!("data not found");

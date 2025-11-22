@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use invoker_auth::{Cert, Challenge, policy};
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
 use crate::{
@@ -15,6 +16,7 @@ pub struct App<S: outgo::Sender, R: income::Receiver> {
     pub sender: Arc<S>,
     pub receiver: Arc<R>,
     pub judge_service: Arc<judge::Service>,
+    pub cert: Arc<Cert>,
 }
 
 impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'static> App<S, R> {
@@ -96,11 +98,21 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
         })
     }
 
+    async fn solve_challenge(&self, challenge: Challenge) -> Result<()> {
+        let solution = challenge.solve(&*self.cert, &policy::StandardPolicy::new())?;
+        self.sender
+            .send(outgo::Msg::ChallengeSolution(solution))
+            .await
+    }
+
     pub async fn run(self: Arc<Self>) -> Result<()> {
         loop {
             log::info!("message listner open");
             let msg = self.receiver.recv().await?;
             match msg {
+                server::income::Msg::Challenge(challenge) => {
+                    (&*self).solve_challenge(challenge).await?
+                }
                 server::income::Msg::Start { data } => _ = self.start_judgment(data),
                 server::income::Msg::Stop => self.judge_service.cancel_all_tests().await?,
                 server::income::Msg::Close => break,
