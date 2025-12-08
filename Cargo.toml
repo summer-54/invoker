@@ -34,7 +34,7 @@ tar_archive_rs = {git = "https://github.com/summer-54/tar_archive_rs.git"}
 resource_pool = {git = "https://github.com/summer-54/resource_pool.git"}
 configo = {git = "https://github.com/summer-54/configo.git"}
 
-invoker_auth = {git = "https://github.com/summer-54/invoker_auth.git"}
+#invoker_auth = {git = "https://github.com/summer-54/invoker_auth.git"}
 
 nix = {version = "*", features = ["user"]}
 
