@@ -5,6 +5,8 @@ use crate::Result;
 
 pub use http::Uri;
 
+const MAX_MESSAGE_SIZE: usize = 1 << 31;
+
 use {
     ratchet_rs::{
         Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
@@ -67,7 +69,9 @@ impl Service {
         log::trace!("websocket start subscribing");
         let stream = TcpStream::connect(socket_addr).await?;
         let client = subscribe_with(
-            WebSocketConfig::default(),
+            WebSocketConfig {
+                max_message_size: MAX_MESSAGE_SIZE,
+            },
             stream,
             uri,
             DeflateExtProvider::with_config(DeflateConfig::default()),
