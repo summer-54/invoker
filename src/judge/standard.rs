@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     LogState, Result,
-    sandbox::{self, MaybeLimited, RunConfig, RunStatus},
+    sandbox::{self, Command, MaybeLimited::*, RunStatus},
 };
 
 const CHECKER_NAME: &str = "checker";
@@ -97,28 +97,21 @@ impl super::Enviroment for Enviroment {
                 )
                 .await?;
 
-            let solution_result = match self
-                .sandbox
-                .run(
-                    self.lang.run_command(TARGET_SOLUTION_PATH),
-                    RunConfig {
-                        time_limit: MaybeLimited::Limited(self.limits.time),
-                        memory_limit: MaybeLimited::Limited(self.limits.memory),
-                        real_time_limit: self.limits.real_time,
-                        extra_time_limit: None,
-                        stack_limit: self.limits.stack.map(|s| MaybeLimited::Limited(s)),
-                        open_files_limit: Some(MaybeLimited::Limited(4)),
-                        process_limit: Some(MaybeLimited::Limited(1)),
-                        env: false,
-                        open_dirs: Box::from(vec![]),
+            let mut solution_cmd = self.lang.command_to_run(TARGET_SOLUTION_PATH);
+            solution_cmd
+                .time(Limited(self.limits.time))
+                .memory(Limited(self.limits.memory))
+                .real_time(Limited(self.limits.real_time));
+            if let Some(stack) = self.limits.stack {
+                solution_cmd.stack(Limited(stack));
+            }
+            solution_cmd
+                .count_files(Limited(4))
+                .count_process(Limited(1))
+                .stdin(TARGET_INPUT_PATH)
+                .stdout(TARGET_OUTPUT_PATH);
 
-                        stdin: Some(TARGET_INPUT_PATH.to_string().into_boxed_str()),
-                        stdout: Some(TARGET_OUTPUT_PATH.to_string().into_boxed_str()),
-                        stderr: None,
-                    },
-                )
-                .await
-            {
+            let solution_result = match self.sandbox.run(&solution_cmd).await {
                 Ok(res) => res,
                 Err(e) => {
                     log::error!("({log_state}) solution run error: {e:?}");
@@ -155,36 +148,21 @@ impl super::Enviroment for Enviroment {
                 log::debug!("({log_state}) correct file not founded");
             }
 
-            let checker_result = match self.sandbox
-                    .run(
-                        format!("./{TARGET_CHECKER_PATH} {TARGET_INPUT_PATH} {TARGET_OUTPUT_PATH} {TARGET_CORRECT_PATH}")
-                            .into_boxed_str(),
-                        RunConfig {
-                            time_limit: MaybeLimited::Limited(self.limits.time),
-                            memory_limit: MaybeLimited::Unlimited,
-                            real_time_limit: self.limits.real_time,
-                            extra_time_limit: None,
-                            stack_limit: Some(MaybeLimited::Unlimited),
-                            open_files_limit: Some(MaybeLimited::Unlimited),
-                            process_limit: None,
+            let mut checker_cmd = Command::new(format!("./{TARGET_CHECKER_PATH}"));
+            checker_cmd
+                .args([TARGET_INPUT_PATH, TARGET_OUTPUT_PATH, TARGET_CORRECT_PATH])
+                .count_files(Unlimited)
+                .count_process(Unlimited)
+                .stdout(TARGET_CHECKER_OUTPUT_PATH)
+                .stderr(TARGET_CHECKER_ERROR_PATH);
 
-                            env: false,
-                            open_dirs: Box::from(vec![]),
-
-
-                            stdout: Some(TARGET_CHECKER_OUTPUT_PATH.to_string().into_boxed_str()),
-                            stdin: None,
-                            stderr: Some(TARGET_CHECKER_ERROR_PATH.to_string().into_boxed_str()),
-                        },
-                    )
-                    .await
-                {
-                    Ok(res) => res,
-                    Err(e) => {
-                        log::error!("({log_state}) checker error: {e:?}");
-                        return Err(e);
-                    }
-                };
+            let checker_result = match self.sandbox.run(&checker_cmd).await {
+                Ok(res) => res,
+                Err(e) => {
+                    log::error!("({log_state}) checker error: {e:?}");
+                    return Err(e);
+                }
+            };
 
             let sandbox_clone = Arc::clone(&self.sandbox);
             let checker_output_handler: JoinHandle<Result<String>> = tokio::spawn(async move {

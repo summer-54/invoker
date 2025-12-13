@@ -10,7 +10,7 @@ Config for sandbox manager
 | Field                      | Type                  | Description                                                     |
 | -------------------------- | --------------------- | --------------------------------------------------------------- |
 | `process_default_limit`    | `MaybeLimited<usize>` | Default process limit sandbox                                   |
-| `stack_default_limit`      | `MaybeLimited<usize>` | Default stack size limit sandbox [Kb]                           |
+| `stack_default_limit`      | `MaybeLimited<u64>` | Default stack size limit sandbox [Kb]                           |
 | `extra_time_default_limit` | `f64`                 | Default extra time limit sandbox (after exceeding `time_limit`) |
 | `open_files_default_limit` | `MaybeLimited<usize>` | Default limit number opened files                               |
 ### `ISOLATE` rules

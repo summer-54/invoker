@@ -19,7 +19,7 @@ use std::{
 
 use crate::{
     LogState, Result,
-    sandbox::{self, MaybeLimited, RunConfig},
+    sandbox::{self, Command, MaybeLimited},
 };
 use configo::Config as _;
 
@@ -27,8 +27,6 @@ use api::{
     submission::{self, Problem},
     test,
 };
-
-const COMPILATION_TIME_LIMIT: f64 = 10.;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -40,29 +38,47 @@ pub enum Lang {
 }
 
 impl Lang {
-    pub fn run_command(&self, name: &str) -> Box<str> {
+    pub fn command_to_run(&self, name: &str) -> Command {
         match self {
-            Self::Gpp => format!("./{name}"),
-            Self::Python => format!("/usr/bin/python3 {name}"),
+            Self::Gpp => Command::new(format!("./{name}")),
+            Self::Python => {
+                let mut cmd = Command::new("/usr/bin/python3");
+                cmd.arg(name);
+                cmd
+            }
         }
-        .into_boxed_str()
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
-    compilation_commands: HashMap<Lang, Box<str>>,
+    compilation_commands: HashMap<Lang, Box<[Box<str>]>>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             compilation_commands: vec![
-                (Lang::Gpp, "/usr/bin/g++ $SOURCE -o $OUTPUT -O2 -Wall -lm"),
-                (Lang::Python, "/usr/bin/cp --update=none $SOURCE $OUTPUT"),
+                (
+                    Lang::Gpp,
+                    vec![
+                        "/usr/bin/g++",
+                        "$SOURCE",
+                        "-o",
+                        "$OUTPUT",
+                        "-O2",
+                        "-Wall",
+                        "-lm",
+                    ]
+                    .into(),
+                ),
+                (
+                    Lang::Python,
+                    vec!["/usr/bin/cp", "--update=none", "$SOURCE", "$OUTPUT"],
+                ),
             ]
             .into_iter()
-            .map(|(k, v)| (k, Box::from(v)))
+            .map(|(k, v)| (k, v.into_iter().map(|s| s.into()).collect()).into())
             .collect(),
         }
     }
@@ -73,19 +89,20 @@ impl configo::Config for Config {
 }
 
 impl Config {
-    pub fn compilation_command(&self, lang: Lang, name: &str, result: &str) -> Result<Box<str>> {
-        let command = self
+    pub fn compilation_command(&self, lang: Lang, name: &str, result: &str) -> Result<Command> {
+        let mut args = self
             .compilation_commands
             .get(&lang)
             .ok_or(anyhow!(
                 "cannot find compilation command for lang: {lang:?} in judge config"
             ))?
-            .clone();
-
-        Ok(command
-            .replace("$SOURCE", name)
-            .replace("$OUTPUT", result)
-            .into_boxed_str())
+            .iter()
+            .map(|s| s.replace("$SOURCE", name).replace("$OUTPUT", result));
+        let mut command = Command::new(args.next().ok_or(anyhow!(
+            "cannot find program name for lang: {lang:?} in judge config"
+        ))?);
+        command.args(args);
+        Ok(command)
     }
 }
 
@@ -159,24 +176,16 @@ impl Service {
             .await?;
 
         let compile_errors_path = "compile_errors";
-        let compilation_command =
+        let mut compilation_command =
             self.config
                 .compilation_command(lang, "solution.cpp", "solution.out")?;
+        compilation_command
+            .count_files(MaybeLimited::Unlimited)
+            .count_process(MaybeLimited::Unlimited)
+            .use_env()
+            .stderr(compile_errors_path);
 
-        let compile_result = sandbox
-            .run(
-                compilation_command,
-                RunConfig {
-                    open_files_limit: Some(MaybeLimited::Unlimited),
-                    time_limit: MaybeLimited::Limited(COMPILATION_TIME_LIMIT),
-                    process_limit: Some(MaybeLimited::Unlimited),
-                    env: true,
-
-                    stderr: Some(compile_errors_path.to_string().into_boxed_str()),
-                    ..Default::default()
-                },
-            )
-            .await?;
+        let compile_result = sandbox.run(&compilation_command).await?;
 
         log::info!("({log_state}) compiling");
 

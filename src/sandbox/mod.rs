@@ -1,3 +1,6 @@
+pub mod command;
+pub use command::Command;
+
 use std::{
     collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio, sync::Arc,
 };
@@ -12,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncWriteExt},
-    process::Command,
+    process::Command as TokioCommand,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -33,9 +36,14 @@ pub struct IsolateConfig {
     sandboxes_count: usize,
 
     process_default_limit: MaybeLimited<usize>,
-    stack_default_limit: MaybeLimited<usize>,
-    extra_time_default_limit: f64,
     open_files_default_limit: MaybeLimited<usize>,
+
+    memory_default_limit: MaybeLimited<u64>,
+    stack_default_limit: MaybeLimited<u64>,
+
+    time_default_limit: MaybeLimited<f64>,
+    extra_time_default_limit: f64,
+    real_time_default_limit: MaybeLimited<f64>, // Real time limit (in seconds)
 
     box_root: Box<str>,
     lock_root: Box<str>,
@@ -61,8 +69,13 @@ impl Default for IsolateConfig {
             restricted_init: false,
 
             process_default_limit: Limited(1),
-            extra_time_default_limit: 0.,
             open_files_default_limit: Limited(2),
+
+            time_default_limit: Limited(10.),
+            extra_time_default_limit: 0.,
+            real_time_default_limit: Limited(10.),
+
+            memory_default_limit: Limited(1 << 20),
             stack_default_limit: Unlimited,
         }
     }
@@ -106,7 +119,7 @@ pub struct Service {
 
 impl Service {
     pub async fn new(config_dir: &str, path: Box<str>) -> Result<Arc<Service>> {
-        if !Command::new(&*path)
+        if !TokioCommand::new(&*path)
             .arg("--version")
             .stdout(Stdio::null())
             .status()
@@ -132,7 +145,7 @@ impl Service {
         let mut log_state = LogState::new();
         log_state = log_state.push("box", &*format!("{box_id}"));
         log::debug!("({log_state}) starting");
-        let output = Command::new(&*self.path)
+        let output = TokioCommand::new(&*self.path)
             .arg("--init")
             .arg(format!("--box-id={box_id}"))
             .output()
@@ -161,49 +174,12 @@ impl Service {
 
     pub async fn clean(self: Arc<Self>) {
         log::info!("isolate cleannig started");
-        let status = Command::new(&*self.path)
+        let status = TokioCommand::new(&*self.path)
             .arg("--cleanup")
             .status()
             .await
             .unwrap();
         log::info!("isolate cleaned with status: {status}")
-    }
-}
-
-pub struct RunConfig {
-    pub time_limit: MaybeLimited<f64>,   // Time limit (in seconds)
-    pub memory_limit: MaybeLimited<u64>, // Memory limit (in KiB)
-    pub real_time_limit: f64,            // Real time limit (in seconds)
-    pub extra_time_limit: Option<f64>,   // Extra time limit (in seconds)
-    pub stack_limit: Option<MaybeLimited<usize>>, // Stack limit (in KiB)
-    pub open_files_limit: Option<MaybeLimited<usize>>,
-    pub process_limit: Option<MaybeLimited<usize>>,
-    pub env: bool,
-
-    pub open_dirs: Box<[Box<str>]>,
-
-    pub stdin: Option<Box<str>>,
-    pub stdout: Option<Box<str>>,
-    pub stderr: Option<Box<str>>,
-}
-
-impl Default for RunConfig {
-    fn default() -> Self {
-        Self {
-            time_limit: Default::default(),
-            memory_limit: Default::default(),
-            real_time_limit: 10.,
-            extra_time_limit: Default::default(),
-            stack_limit: Default::default(),
-            open_files_limit: Default::default(),
-            process_limit: Default::default(),
-            open_dirs: Box::from(vec![]),
-            env: false,
-
-            stdin: Default::default(),
-            stdout: Default::default(),
-            stderr: Default::default(),
-        }
     }
 }
 
@@ -262,22 +238,23 @@ impl Sandbox {
         format!("{}/{}/box", self.service.config.box_root, self.id).into_boxed_str()
     }
 
-    pub async fn run(&self, target_command: Box<str>, cfg: RunConfig) -> Result<RunResult> {
+    pub async fn run(&self, target: &Command) -> Result<RunResult> {
+        let target = target.clone();
         let meta_path = format!("{}/meta", self.inner_dir());
         let mut log_st = LogState::new();
         log_st = log_st.push("box", &*format!("{}", self.id()));
 
-        let mut command = Command::new(&*self.service.path);
+        let mut command = TokioCommand::new(&*self.service.path);
         command
             .arg(format!("--box-id={}", self.id))
             .arg(format!("--meta={meta_path}"))
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
-        if let Some(input_path) = cfg.stdin {
+        if let Some(input_path) = target.stdin {
             command.arg(format!("--stdin={input_path}"));
         }
-        if let Some(output_path) = cfg.stdout {
+        if let Some(output_path) = target.stdout {
             if output_path.chars().nth(0).unwrap() != '/' {
                 let path = format!("{}/{}", self.inner_dir(), output_path);
                 tokio::fs::File::create(&path).await?;
@@ -285,7 +262,7 @@ impl Sandbox {
             log::trace!("({log_st}) file: {output_path} created");
             command.arg(format!("--stdout={output_path}"));
         }
-        if let Some(error_path) = cfg.stderr {
+        if let Some(error_path) = target.stderr {
             if error_path.chars().nth(0).unwrap() != '/' {
                 let path = format!("{}/{}", self.inner_dir(), error_path);
                 tokio::fs::File::create(&path).await?;
@@ -295,37 +272,50 @@ impl Sandbox {
             command.arg(format!("--stderr={error_path}"));
         }
 
-        for dir in cfg.open_dirs {
+        for dir in target.open_dirs {
             command.arg(format!("--dir={dir}"));
         }
 
-        if let Limited(time_limit) = cfg.time_limit {
+        if let Limited(time_limit) = target
+            .time_limit
+            .unwrap_or(self.service.config.time_default_limit)
+        {
             command.arg(format!("--time={}", time_limit));
         }
-        if let Limited(memory_limit) = cfg.memory_limit {
+
+        if let Limited(real_time_limit) = target
+            .real_time_limit
+            .unwrap_or(self.service.config.real_time_default_limit)
+        {
+            command.arg(format!("--wall-time={}", real_time_limit));
+        }
+
+        if let Limited(memory_limit) = target
+            .memory_limit
+            .unwrap_or(self.service.config.memory_default_limit)
+        {
             command.arg(format!("--mem={}", memory_limit));
         }
-        command
-            .arg(format!("--wall-time={}", cfg.real_time_limit))
-            .arg(format!(
-                "--extra-time={}",
-                cfg.extra_time_limit
-                    .unwrap_or(self.service.config.extra_time_default_limit)
-            ));
-        if let Limited(stack_limit) = cfg
+        command.arg(format!(
+            "--extra-time={}",
+            target
+                .extra_time_limit
+                .unwrap_or(self.service.config.extra_time_default_limit)
+        ));
+        if let Limited(stack_limit) = target
             .stack_limit
             .unwrap_or(self.service.config.stack_default_limit)
         {
             command.arg(format!("--stack={}", stack_limit));
         }
-        if let Limited(open_files_limit) = cfg
-            .open_files_limit
+        if let Limited(open_files_limit) = target
+            .count_files_limit
             .unwrap_or(self.service.config.open_files_default_limit)
         {
             command.arg(format!("--open-files={}", open_files_limit));
         }
-        if let Limited(process_limit) = cfg
-            .process_limit
+        if let Limited(process_limit) = target
+            .count_process_limit
             .unwrap_or(self.service.config.process_default_limit)
         {
             command.arg(format!("--processes={}", process_limit));
@@ -333,14 +323,15 @@ impl Sandbox {
             command.arg(format!("--processes"));
         }
 
-        if cfg.env {
+        if target.use_env {
             command.arg(format!("--full-env"));
         }
 
         command
             .arg("--run")
             .arg("--")
-            .args(target_command.to_string().split_ascii_whitespace());
+            .arg(target.program.to_string())
+            .args(target.args.into_iter().map(|b| b.to_string()));
 
         log::trace!("({log_st}) executing:\n{command:#?}");
 
