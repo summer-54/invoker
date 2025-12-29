@@ -83,7 +83,7 @@ pub mod submission {
         pub real_time: f64,
 
         pub memory: u64,
-        pub stack: Option<usize>,
+        pub stack: Option<u64>,
     }
 
     #[derive(Debug, Deserialize, Clone)]

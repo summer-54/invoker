@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     LogState, Result,
-    sandbox::{self, MaybeLimited, RunConfig, RunStatus},
+    sandbox::{self, MaybeLimited, RunStatus},
 };
 
 const TEST_DIR: &str = "test";
@@ -119,53 +119,43 @@ impl super::Enviroment for Enviroment {
                 .await?;
 
             let interactor_sandbox_clone = Arc::clone(&self.interactor_sandbox);
-            let interactor_run_config = RunConfig {
-                time_limit: MaybeLimited::Limited(self.limits.time),
-                memory_limit: MaybeLimited::Unlimited,
-                real_time_limit: self.limits.real_time,
-                extra_time_limit: None,
-                stack_limit: Some(MaybeLimited::Unlimited),
-                open_files_limit: None,
-                process_limit: Some(MaybeLimited::Unlimited),
-                open_dirs: Box::from(vec![Box::from(CHANNEL_DIR)]),
-
-                env: false,
-
-                stdin: Some(solution_output_channel.0.clone()),
-                stdout: Some(solution_input_channel.0.clone()),
-                stderr: Some(TARGET_INTERACTOR_ERROR_PATH.to_string().into_boxed_str()),
-            };
             let lang = self.lang;
+            let time_limit = self.limits.time;
+            let real_time_limit = self.limits.real_time;
+            let solution_output_channel_path = solution_output_channel.0.clone();
+            let solution_input_channel_path = solution_input_channel.0.clone();
             let interactor_handler = tokio::spawn(async move {
-                interactor_sandbox_clone.run(
-                    lang.run_command(&*format!("./{TARGET_INTERACTOR_PATH} {TARGET_TEST_PATH} {TARGET_INTERACTOR_OUTPUT_PATH}")
-                        .into_boxed_str(),),
-                    interactor_run_config,
-                ).await
+                let mut cmd = lang.command_to_run(TARGET_INTERACTOR_PATH);
+                cmd.args([TARGET_TEST_PATH, TARGET_INTERACTOR_OUTPUT_PATH])
+                    .time(MaybeLimited::Limited(time_limit))
+                    .real_time(MaybeLimited::Limited(real_time_limit))
+                    .count_process(MaybeLimited::Unlimited)
+                    .open_dir(CHANNEL_DIR)
+                    .stdin(solution_output_channel_path)
+                    .stdout(solution_input_channel_path)
+                    .stderr(TARGET_INTERACTOR_ERROR_PATH);
+                interactor_sandbox_clone.run(&cmd).await
             });
 
             let sandbox_clone = Arc::clone(&self.sandbox);
-
-            let solution_run_config = RunConfig {
-                time_limit: MaybeLimited::Limited(self.limits.time),
-                memory_limit: MaybeLimited::Limited(self.limits.memory),
-                real_time_limit: self.limits.real_time,
-                extra_time_limit: None,
-                stack_limit: self.limits.stack.map(|s| MaybeLimited::Limited(s)),
-                open_files_limit: None,
-                process_limit: Some(MaybeLimited::Limited(1)),
-                env: false,
-                open_dirs: Box::from(vec![Box::from(CHANNEL_DIR)]),
-
-                stdin: Some(solution_input_channel.0.clone()),
-                stdout: Some(solution_output_channel.0.clone()),
-                stderr: None,
-            };
+            let memory_limit = self.limits.memory;
+            let stack_limit = self.limits.stack;
+            let solution_input_channel_path = solution_input_channel.0.clone();
+            let solution_output_channel_path = solution_output_channel.0.clone();
 
             let solution_handler = tokio::spawn(async move {
-                sandbox_clone
-                    .run(lang.run_command(TARGET_SOLUTION_PATH), solution_run_config)
-                    .await
+                let mut cmd = lang.command_to_run(TARGET_SOLUTION_PATH);
+                cmd.time(MaybeLimited::Limited(time_limit))
+                    .memory(MaybeLimited::Limited(memory_limit))
+                    .real_time(MaybeLimited::Limited(real_time_limit));
+                if let Some(stack) = stack_limit {
+                    cmd.stack(MaybeLimited::Limited(stack));
+                }
+                cmd.count_process(MaybeLimited::Limited(1))
+                    .open_dir(CHANNEL_DIR)
+                    .stdin(&*solution_input_channel_path)
+                    .stdout(&*solution_output_channel_path);
+                sandbox_clone.run(&cmd).await
             });
 
             let solution_result = match solution_handler.await? {
