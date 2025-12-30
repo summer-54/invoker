@@ -9,10 +9,13 @@ Config for sandbox manager
 
 | Field                      | Type                  | Description                                                     |
 | -------------------------- | --------------------- | --------------------------------------------------------------- |
-| `process_default_limit`    | `MaybeLimited<usize>` | Default process limit sandbox                                   |
-| `stack_default_limit`      | `MaybeLimited<u64>` | Default stack size limit sandbox [Kb]                           |
-| `extra_time_default_limit` | `f64`                 | Default extra time limit sandbox (after exceeding `time_limit`) |
 | `open_files_default_limit` | `MaybeLimited<usize>` | Default limit number opened files                               |
+| `process_default_limit`    | `MaybeLimited<usize>` | Default process limit sandbox                                   |
+| `memory_default_limit`     | `MaybeLimited<u64>`   | Default memory size limit sandbox [Kb]                          |
+| `stack_default_limit`      | `MaybeLimited<u64>`   | Default stack size limit sandbox [Kb]                           |
+| `time_default_limit`       | `MaybeLimited<f64>`   | Default time limit sandbox                                      |
+| `real_time_default_limit`  | `MaybeLimited<f64>`   | Default real time limit sandbox                                 |
+| `extra_time_default_limit` | `f64`                 | Default extra time limit sandbox (after exceeding `time_limit`) |
 ### `ISOLATE` rules
 
 | Field             | Type    | Description                                                                                                         | Default               |
@@ -27,9 +30,12 @@ Config for sandbox manager
 ``` yaml
 sandboxes_count: 1000
 process_default_limit: !Limited 1
-stack_default_limit: !Unlimited
-extra_time_default_limit: 0.0
 open_files_default_limit: !Limited 2
+memory_default_limit: !Limited 1048576
+stack_default_limit: Unlimited
+time_default_limit: !Limited 10.0
+extra_time_default_limit: 0.0
+real_time_default_limit: !Limited 10.0
 box_root: /.invoker/isolate
 lock_root: /run/isolate/locks
 cg_root: /run/isolate/cgroup
@@ -43,8 +49,20 @@ Configs for judging
 
 ``` yaml
 compilation_commands:
-  g++: /usr/bin/g++ $SOURCE -o $OUTPUT -O2 -Wall -lm
-  python3: /usr/bin/cp --update=none $SOURCE $OUTPUT
+  python3:
+  - '/usr/bin/cp'
+  - '--update=none'
+  - '$SOURCE'
+  - '$OUTPUT'
+  g++:
+  - '/usr/bin/g++'
+  - '$SOURCE'
+  - '-o'
+  - '$OUTPUT'
+  - '-O2'
+  - '-Wall'
+  - '-lm'
+
 ```
 ### `compilation_commands`
 
@@ -91,6 +109,7 @@ TYPE CLOSE
 ```
 TYPE TOKEN
 ID <token: uuid>
+KEY <name: str>
 ```
 ###  Authenticate
 ```

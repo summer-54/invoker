@@ -21,6 +21,7 @@ pub struct Command {
     pub(super) stderr: Option<Box<str>>,
 }
 
+#[allow(dead_code)]
 impl Command {
     pub fn new(program: impl AsRef<str>) -> Self {
         Self {

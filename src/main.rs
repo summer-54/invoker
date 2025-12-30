@@ -16,8 +16,6 @@ use crate::{
     },
 };
 
-const SECRET_PGP_KEY_PATH: &str = "key.sec";
-
 #[cfg(not(feature = "mock"))]
 use {crate::server::websocket::Uri, std::str::FromStr};
 pub use {
@@ -37,6 +35,8 @@ struct Config {
     pub work_dir: Box<str>,
 
     pub isolate_exe_path: Box<str>,
+    pub cert_name: Box<str>,
+    pub cert_path: Box<str>,
 }
 
 impl Config {
@@ -61,7 +61,10 @@ async fn init_communnication(
     );
 
     websocket_service
-        .send(server::outgo::Msg::Token(token))
+        .send(server::outgo::Msg::Token {
+            token,
+            name: config.cert_name,
+        })
         .await?;
 
     Ok((websocket_service.clone(), websocket_service))
@@ -92,7 +95,7 @@ async fn main() -> Result<()> {
     println!("\n[{}] invoker token\n", format!("{token}").yellow().bold());
 
     let (receiver, sender) = init_communnication(token, config.clone()).await?;
-
+    let cert = Cert::from_file(&*config.cert_path)?;
     let isolate_service =
         sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
@@ -102,7 +105,7 @@ async fn main() -> Result<()> {
         judge_service: Arc::new(
             judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
         ),
-        cert: Arc::new(Cert::from_file(SECRET_PGP_KEY_PATH)?),
+        cert: Arc::new(cert),
     };
 
     let app = Arc::new(app);

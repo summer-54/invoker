@@ -69,7 +69,10 @@ pub mod outgo {
 
     // #[derive(Debug)]
     pub enum Msg {
-        Token(uuid::Uuid),
+        Token {
+            token: uuid::Uuid,
+            name: Box<str>,
+        },
         ChallengeSolution(Box<[u8]>),
         FullVerdict(FullVerdict),
         TestVerdict {
@@ -94,7 +97,11 @@ pub mod outgo {
     impl std::fmt::Debug for Msg {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                Self::Token(token) => f.debug_tuple("Token").field(token).finish(),
+                Self::Token { token, name } => f
+                    .debug_struct("Token")
+                    .field("token", token)
+                    .field("name", name)
+                    .finish(),
                 Self::ChallengeSolution(data) => f
                     .debug_struct("ChallengeSolution")
                     .field("data", &Box::<[u8]>::from(&data[..VISIBLE_DATA_LEN]))

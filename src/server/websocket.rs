@@ -163,9 +163,10 @@ impl outgo::Sender for Service {
                             map.push(("TYPE".into(), "OPERROR".into()));
                             map.push(("MESSAGE".into(), msg));
                         }
-                        outgo::Msg::Token(token) => {
+                        outgo::Msg::Token { token, name } => {
                             map.push(("TYPE".into(), "TOKEN".into()));
                             map.push(("ID".into(), format!("{}", token.as_u128()).into()));
+                            map.push(("NAME".into(), name));
                         }
                         outgo::Msg::ChallengeSolution(data) => {
                             map.push(("TYPE".into(), "AUTH".into()));
