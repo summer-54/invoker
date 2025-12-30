@@ -5,6 +5,7 @@ mod logger;
 mod sandbox;
 mod server;
 
+use anyhow::Context;
 use colored::Colorize;
 use invoker_auth::{Cert, Parse};
 
@@ -41,7 +42,9 @@ struct Config {
 
 impl Config {
     pub async fn init() -> Result<Self> {
-        let config = envy::prefixed("INVOKER_").from_env::<Config>()?;
+        let config = envy::prefixed("INVOKER_")
+            .from_env::<Config>()
+            .context("env config reading")?;
         log::debug!("environment variables:\n{config:#?}");
         Ok(config)
     }
@@ -111,7 +114,12 @@ async fn main() -> Result<()> {
     let app = Arc::new(app);
     let result = Arc::clone(&app).run();
     for name in std::env::args().skip(1) {
-        app.start_judgment(tokio::fs::read(name.as_str()).await?.into_boxed_slice());
+        app.start_judgment(
+            tokio::fs::read(name.as_str())
+                .await
+                .context("reading file '{name}'")?
+                .into_boxed_slice(),
+        );
     }
 
     let result = result.await;

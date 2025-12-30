@@ -3,7 +3,7 @@ pub mod api;
 mod interactive;
 mod standard;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
 use tar_archive_rs as archive;
 use tokio::{
@@ -163,7 +163,10 @@ impl Service {
     }
 
     async fn compile_solution(&self, lang: Lang) -> Result<Option<submission::Result>> {
-        let sandbox = Arc::clone(&self.sandboxes).initialize_sandbox().await?;
+        let sandbox = Arc::clone(&self.sandboxes)
+            .initialize_sandbox()
+            .await
+            .context("sandbox initializing")?;
 
         let mut log_state = LogState::new();
         log_state = log_state.push("box", &*format!("{}", sandbox.id()));
@@ -234,7 +237,11 @@ impl Service {
         let problem: Arc<Problem> = Arc::new(serde_yml::from_str(text.as_str())?);
         let lang = problem.lang;
 
-        if let Some(verdict) = self.compile_solution(lang).await? {
+        if let Some(verdict) = self
+            .compile_solution(lang)
+            .await
+            .context("solution compiling")?
+        {
             return Ok(verdict);
         }
 
@@ -262,13 +269,16 @@ impl Service {
                 log::trace!("({log_state}) test started");
 
                 let problem = Arc::clone(&problem);
-                let enviroment = self.prepare(problem, test_number, log_state).await?;
+                let enviroment = self
+                    .prepare(problem, test_number, log_state)
+                    .await
+                    .context("enviroment preparing")?;
 
                 let blocked_groups = Arc::clone(&blocked_groups);
                 let sender = sender.clone();
 
                 handlers.push(tokio::spawn(async move {
-                    let result = enviroment.run().await?;
+                    let result = enviroment.run().await.context("enviroment running")?;
                     sender.send((test_number + 1, result.clone())).unwrap();
                     if !result.verdict.is_success() {
                         let block = &mut blocked_groups.lock().await[group.id];
@@ -308,7 +318,9 @@ impl Service {
 
         log::info!("full result: {result:?}");
 
-        remove_dir_all(&*self.work_dir).await?;
+        remove_dir_all(&*self.work_dir)
+            .await
+            .context("dirs cleaning")?;
         tokio::fs::create_dir(&*self.work_dir).await?;
         drop(permit);
         Ok(result)
@@ -330,7 +342,8 @@ impl Service {
                     test_id,
                     log_state,
                 )
-                .await?,
+                .await
+                .context("standart preparing")?,
             ),
             submission::Type::Interactive => Box::from(
                 interactive::prepare(
@@ -341,7 +354,8 @@ impl Service {
                     test_id,
                     log_state,
                 )
-                .await?,
+                .await
+                .context("interactive preparing")?,
             ),
         })
     }

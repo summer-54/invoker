@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use invoker_auth::{Cert, Challenge, policy};
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
@@ -108,13 +109,18 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
     pub async fn run(self: Arc<Self>) -> Result<()> {
         loop {
             log::info!("message listner open");
-            let msg = self.receiver.recv().await?;
+            let msg = self.receiver.recv().await.context("reading message")?;
             match msg {
-                server::income::Msg::Challenge(challenge) => {
-                    (&*self).solve_challenge(challenge).await?
-                }
+                server::income::Msg::Challenge(challenge) => (&*self)
+                    .solve_challenge(challenge)
+                    .await
+                    .context("solving auth challenge")?,
                 server::income::Msg::Start { data } => _ = self.start_judgment(data),
-                server::income::Msg::Stop => self.judge_service.cancel_all_tests().await?,
+                server::income::Msg::Stop => self
+                    .judge_service
+                    .cancel_all_tests()
+                    .await
+                    .context("all tests cancelling")?,
                 server::income::Msg::Close => break,
             }
         }

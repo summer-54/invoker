@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use super::{income, outgo};
 use crate::Result;
 
+use anyhow::Context;
 pub use http::Uri;
 use invoker_auth::Challenge;
 
@@ -68,7 +69,9 @@ pub struct Service {
 impl Service {
     pub async fn new<A: ToSocketAddrs>(socket_addr: A, uri: Uri) -> Result<Service> {
         log::trace!("websocket start subscribing");
-        let stream = TcpStream::connect(socket_addr).await?;
+        let stream = TcpStream::connect(socket_addr)
+            .await
+            .context("TcpStream connecting")?;
         let client = subscribe_with(
             WebSocketConfig {
                 max_message_size: MAX_MESSAGE_SIZE,
@@ -78,7 +81,8 @@ impl Service {
             DeflateExtProvider::with_config(DeflateConfig::default()),
             SubprotocolRegistry::default(),
         )
-        .await?;
+        .await
+        .context("connection subscribing")?;
         log::trace!("end subscribing");
 
         let UpgradedClient {
@@ -177,7 +181,8 @@ impl outgo::Sender for Service {
                 },
                 ratchet_rs::PayloadType::Binary,
             )
-            .await?;
+            .await
+            .context("websocket message sending")?;
         Ok(())
     }
 }
@@ -185,7 +190,12 @@ impl income::Receiver for Service {
     async fn recv(&self) -> Result<income::Msg> {
         loop {
             let mut msg = bytes::BytesMut::new();
-            self.read.lock().await.read(&mut msg).await?;
+            self.read
+                .lock()
+                .await
+                .read(&mut msg)
+                .await
+                .context("reading websocket messages")?;
             let (map, data) = deserialize_msg(&*msg);
             let Some(msg_type) = map.get("TYPE") else {
                 log::error!("field 'TYPE' not found");

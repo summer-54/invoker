@@ -1,4 +1,5 @@
 pub mod command;
+use anyhow::Context;
 pub use command::Command;
 
 use std::{
@@ -257,7 +258,9 @@ impl Sandbox {
         if let Some(output_path) = target.stdout {
             if output_path.chars().nth(0).unwrap() != '/' {
                 let path = format!("{}/{}", self.inner_dir(), output_path);
-                tokio::fs::File::create(&path).await?;
+                tokio::fs::File::create(&path)
+                    .await
+                    .context("creating file")?;
             }
             log::trace!("({log_st}) file: {output_path} created");
             command.arg(format!("--stdout={output_path}"));
@@ -265,7 +268,9 @@ impl Sandbox {
         if let Some(error_path) = target.stderr {
             if error_path.chars().nth(0).unwrap() != '/' {
                 let path = format!("{}/{}", self.inner_dir(), error_path);
-                tokio::fs::File::create(&path).await?;
+                tokio::fs::File::create(&path)
+                    .await
+                    .context("creating file")?;
             }
 
             log::trace!("({log_st}) file: {error_path} created");
@@ -335,17 +340,19 @@ impl Sandbox {
 
         log::trace!("({log_st}) executing:\n{command:#?}");
 
-        _ = command.status().await?;
+        _ = command.status().await.context("running command")?;
 
-        let meta = tokio::fs::read_to_string(meta_path).await?;
+        let meta = tokio::fs::read_to_string(meta_path)
+            .await
+            .context("reading file '{meta_path}'")?;
         log::trace!("({log_st}) meta file:\n{meta}");
         let meta = parse_meta_file(&meta);
 
         let result = RunResult {
             status: if let Some(status) = meta.get("status") {
                 match &**status {
-                    "RE" => RunStatus::Re(meta["exitcode"].parse()?),
-                    "SG" => match meta["exitsig"].parse()? {
+                    "RE" => RunStatus::Re(meta["exitcode"].parse().context("parsing exitcode")?),
+                    "SG" => match meta["exitsig"].parse().context("parsing exitsig")? {
                         6 | 11 => RunStatus::Ml,
                         signal => RunStatus::Sg(signal),
                     },
@@ -355,10 +362,10 @@ impl Sandbox {
             } else {
                 RunStatus::Ok
             },
-            time: meta["time"].parse()?,
-            real_time: meta["time-wall"].parse()?,
+            time: meta["time"].parse().context("parsing time")?,
+            real_time: meta["time-wall"].parse().context("parsing time-wall")?,
             status_message: meta.get("message").cloned(),
-            memory: meta["max-rss"].parse()?,
+            memory: meta["max-rss"].parse().context("max-rss")?,
             killed: meta.get("killed").map(|s| &**s).unwrap_or("0") == "1",
         };
 
@@ -376,8 +383,12 @@ impl Sandbox {
         log_st = log_st.push("box", &*format!("{}", self.id()));
 
         _ = tokio::io::copy(from, &mut {
-            let file = File::create(format!("{}/{to}", self.inner_dir())).await?;
-            file.set_permissions(Permissions::from_mode(0o777)).await?;
+            let file = File::create(format!("{}/{to}", self.inner_dir()))
+                .await
+                .context("creating file")?;
+            file.set_permissions(Permissions::from_mode(0o777))
+                .await
+                .context("setting permissions")?;
             file
         })
         .await?;
