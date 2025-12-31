@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use invoker_auth::{Cert, Challenge, policy};
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
@@ -41,7 +41,7 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                 ])
                 .await
                 .unwrap_or_else(|e| {
-                    log::error!("sending 'TestVerdict': compression error: {e}");
+                    log::error!("sending 'TestVerdict': compression error: {e:?}");
                     vec![].into_boxed_slice()
                 });
                 self_clone
@@ -111,6 +111,11 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
             log::info!("message listner open");
             let msg = self.receiver.recv().await.context("reading message")?;
             match msg {
+                server::income::Msg::AuthVerdict(verdict) => {
+                    if !verdict {
+                        bail!("auth FAILED");
+                    }
+                }
                 server::income::Msg::Challenge(challenge) => (&*self)
                     .solve_challenge(challenge)
                     .await

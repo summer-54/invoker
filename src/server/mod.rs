@@ -14,6 +14,7 @@ pub mod income {
 
     pub enum Msg {
         Challenge(Challenge),
+        AuthVerdict(bool),
         Start { data: Box<[u8]> },
         Stop,
         Close,
@@ -35,6 +36,9 @@ pub mod income {
                     .finish(),
                 Self::Stop => write!(f, "Stop"),
                 Self::Close => write!(f, "Close"),
+                Self::AuthVerdict(verdict) => {
+                    write!(f, "{}", if *verdict { "Approved" } else { "Denied" })
+                }
             }
         }
     }

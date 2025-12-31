@@ -203,6 +203,14 @@ impl income::Receiver for Service {
             };
 
             let msg = match &**msg_type {
+                "AUTH_VERDICT" => {
+                    income::Msg::AuthVerdict(if let Some(verdict) = map.get("VERDICT") {
+                        **verdict == *"APPROVED"
+                    } else {
+                        log::error!("field 'VERDICT' not found");
+                        continue;
+                    })
+                }
                 "AUTH_CHALLENGE" => {
                     let Some(data) = data else {
                         log::error!("data not found");

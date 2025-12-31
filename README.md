@@ -84,6 +84,7 @@ Target web-socket client at `ws://$INVOKER_MANAGER_HOST`
 ```
 TYPE AUTH_CHALLENGE
 DATA
+<binary data: challenge>
 ```
 ### Authenticate verdict
 ```

@@ -5,7 +5,7 @@ mod logger;
 mod sandbox;
 mod server;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use colored::Colorize;
 use invoker_auth::{Cert, Parse};
 
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
 
     if !nix::unistd::Uid::current().is_root() {
         println!("{}", "must started as root".red().bold());
-        return Err(anyhow!("must started as root"));
+        bail!("must started as root");
     }
 
     let config = Config::init().await?;
@@ -134,7 +134,7 @@ async fn main() -> Result<()> {
                 .await?
         }
         Err(e) => {
-            log::error!("error: '{e}'");
+            log::error!("error: '{e:?}'");
             app.sender
                 .send(outgo::Msg::Exited {
                     code: 1,
