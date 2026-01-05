@@ -4,6 +4,7 @@ mod interactive;
 mod standard;
 
 use anyhow::{Context, anyhow};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tar_archive_rs as archive;
 use tokio::{
@@ -13,9 +14,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use std::{
-    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, pin::Pin, sync::Arc,
-};
+use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use crate::{
     LogState, Result,
@@ -127,8 +126,9 @@ pub fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
     .into_boxed_str()
 }
 
+#[async_trait]
 pub trait Enviroment: Send {
-    fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<test::Result>> + Send>>;
+    async fn run(self: Box<Self>) -> Result<test::Result>;
 }
 
 impl Service {
@@ -344,7 +344,7 @@ impl Service {
                 )
                 .await
                 .context("standart preparing")?,
-            ),
+            ) as Box<dyn Enviroment>,
             submission::Type::Interactive => Box::from(
                 interactive::prepare(
                     Arc::clone(&self.sandboxes),
@@ -356,7 +356,7 @@ impl Service {
                 )
                 .await
                 .context("interactive preparing")?,
-            ),
+            ) as Box<dyn Enviroment>,
         })
     }
 }

@@ -93,6 +93,11 @@ async fn main() -> Result<()> {
 
     let config = Config::init().await?;
 
+    if !tokio::fs::try_exists(&*config.config_dir).await? {
+        log::error!("config directory: '{}' not founded", config.config_dir);
+        bail!("config directory: '{}' not founded", config.config_dir);
+    }
+
     let judger_work_dir = format!("{}/judge", config.work_dir).into_boxed_str();
     let token = Uuid::new_v4();
     println!("\n[{}] invoker token\n", format!("{token}").yellow().bold());

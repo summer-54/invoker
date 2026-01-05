@@ -38,5 +38,7 @@ invoker_auth = {git = "https://github.com/summer-54/invoker_auth.git"}
 
 nix = {version = "*", features = ["user"]}
 
+async-trait = {version = "*"}
+
 [features]
 mock = []
