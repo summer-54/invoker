@@ -1,12 +1,12 @@
 use super::Lang;
 
 pub mod test {
-    use std::sync::Arc;
+    use std::{fmt::Debug, sync::Arc};
 
     use serde::{Deserialize, Serialize};
 
-    use crate::sandbox;
-    #[derive(Debug, Clone)]
+    use crate::{VISIBLE_DATA_LEN, sandbox};
+    #[derive(Clone)]
     pub struct Result {
         pub verdict: Verdict,
         pub time: f64,
@@ -14,6 +14,32 @@ pub mod test {
 
         pub output: Arc<str>,
         pub message: Arc<str>,
+    }
+
+    impl Debug for Result {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("Result")
+                .field("verdict", &self.verdict)
+                .field("time", &self.time)
+                .field("memory", &self.memory)
+                .field(
+                    "output",
+                    &self
+                        .output
+                        .chars()
+                        .take(VISIBLE_DATA_LEN)
+                        .collect::<String>(),
+                )
+                .field(
+                    "message",
+                    &self
+                        .message
+                        .chars()
+                        .take(VISIBLE_DATA_LEN)
+                        .collect::<String>(),
+                )
+                .finish()
+        }
     }
 
     #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]

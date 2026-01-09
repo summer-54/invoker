@@ -116,6 +116,7 @@ KEY <name: str>
 ```
 TYPE AUTH
 DATA
+<bytes>
 ```
 ### Test verdict
 ```

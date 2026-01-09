@@ -2,15 +2,16 @@
 pub mod websocket;
 
 use crate::Result;
-
-const VISIBLE_DATA_LEN: usize = 5;
+use crate::VISIBLE_DATA_LEN;
 
 #[allow(dead_code)]
 pub mod income {
     use invoker_auth::Challenge;
     use std::future;
 
-    use super::{Result, VISIBLE_DATA_LEN};
+    use crate::short_slice_u8;
+
+    use super::Result;
 
     pub enum Msg {
         Challenge(Challenge),
@@ -27,12 +28,12 @@ pub mod income {
                     .debug_struct("Challenge")
                     .field(
                         "data",
-                        &Box::<[u8]>::from(&challenge.bytes()[..VISIBLE_DATA_LEN]),
+                        &Box::<[u8]>::from(short_slice_u8(&challenge.bytes())),
                     )
                     .finish(),
                 Self::Start { data } => f
                     .debug_struct("Start")
-                    .field("data", &Box::<[u8]>::from(&data[..VISIBLE_DATA_LEN]))
+                    .field("data", &Box::<[u8]>::from(short_slice_u8(&data)))
                     .finish(),
                 Self::Stop => write!(f, "Stop"),
                 Self::Close => write!(f, "Close"),

@@ -9,6 +9,12 @@ use anyhow::{Context, bail};
 use colored::Colorize;
 use invoker_auth::{Cert, Parse};
 
+const VISIBLE_DATA_LEN: usize = 30;
+
+fn short_slice_u8(data: &[u8]) -> &[u8] {
+    &data[..std::cmp::min(data.len(), VISIBLE_DATA_LEN)]
+}
+
 use crate::{
     application::App,
     server::{
@@ -143,7 +149,7 @@ async fn main() -> Result<()> {
             app.sender
                 .send(outgo::Msg::Exited {
                     code: 1,
-                    data: e.to_string().into_boxed_str(),
+                    data: format!("{e:?}").into_boxed_str(),
                 })
                 .await?
         }
