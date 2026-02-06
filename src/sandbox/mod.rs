@@ -1,5 +1,5 @@
 pub mod command;
-use anyhow::Context;
+use crate::prelude::*;
 pub use command::Command;
 
 use std::{
@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{LogState, Result, anyhow};
-use colored::Colorize as _;
+
 use configo::Config as _;
 
 use resource_pool::ResourcePool;

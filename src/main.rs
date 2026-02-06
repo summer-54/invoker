@@ -2,12 +2,12 @@ mod application;
 mod channel;
 mod judge;
 mod logger;
+mod prelude;
 mod sandbox;
 mod server;
 
-use anyhow::{Context, bail};
-use colored::Colorize;
 use invoker_auth::{Cert, Parse};
+use prelude::*;
 
 const VISIBLE_DATA_LEN: usize = 30;
 

@@ -1,6 +1,6 @@
+use crate::prelude::*;
 use std::{fmt::Display, sync::Arc};
 
-use colored::Colorize;
 pub struct LogState(Option<(Arc<LogState>, Box<str>, Box<str>)>);
 impl LogState {
     pub fn new() -> Arc<Self> {

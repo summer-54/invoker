@@ -1,5 +1,4 @@
-use std::io::{Error, Result};
-
+use crate::prelude::*;
 pub struct Channel(pub Box<str>);
 
 impl Channel {
@@ -18,10 +17,7 @@ impl Channel {
 
             Ok(Channel(path))
         } else {
-            Err(Error::new(
-                std::io::ErrorKind::Other,
-                "'mkfifo' command doesn't work",
-            ))
+            bail!("'mkfifo' command doesn't work")
         }
     }
 }
