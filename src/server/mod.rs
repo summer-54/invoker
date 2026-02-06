@@ -1,8 +1,8 @@
 #[cfg(not(feature = "mock"))]
 pub mod websocket;
 
-use crate::Result;
 use crate::VISIBLE_DATA_LEN;
+use crate::prelude::*;
 
 #[allow(dead_code)]
 pub mod income {
