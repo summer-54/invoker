@@ -24,7 +24,7 @@ use crate::{
 use configo::Config as _;
 
 use api::{
-    submission::{self, Problem},
+    submission::{self, Task},
     test,
 };
 
@@ -235,8 +235,8 @@ impl Service {
 
         log::trace!("config.yaml:\n{text}");
 
-        let problem: Arc<Problem> = Arc::new(serde_yml::from_str(text.as_str())?);
-        let lang = problem.lang;
+        let task: Arc<Task> = Arc::new(serde_yml::from_str(text.as_str())?);
+        let lang = task.lang;
 
         if let Some(verdict) = self
             .compile_solution(lang)
@@ -248,11 +248,9 @@ impl Service {
 
         let mut handlers: Vec<JoinHandle<Result<()>>> = vec![];
 
-        let blocked_groups = Arc::new(Mutex::new(
-            vec![None; problem.groups.len()].into_boxed_slice(),
-        ));
+        let blocked_groups = Arc::new(Mutex::new(vec![None; task.groups.len()].into_boxed_slice()));
 
-        for group in problem.groups.clone() {
+        for group in task.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
                 let mut log_state = LogState::new();
                 log_state = log_state.push("test", &*format!("{test_number}"));
@@ -269,9 +267,9 @@ impl Service {
 
                 log::trace!("({log_state}) test started");
 
-                let problem = Arc::clone(&problem);
+                let task = Arc::clone(&task);
                 let enviroment = self
-                    .prepare(problem, test_number, log_state)
+                    .prepare(task, test_number, log_state)
                     .await
                     .context("enviroment preparing")?;
 
@@ -301,11 +299,11 @@ impl Service {
         }
         let blocked_groups = blocked_groups.lock().await;
 
-        let groups_score: Box<[usize]> = (0..problem.groups.len())
+        let groups_score: Box<[usize]> = (0..task.groups.len())
             .into_iter()
             .map(|i| {
                 if blocked_groups[i].is_none() {
-                    problem.groups[i].cost
+                    task.groups[i].cost
                 } else {
                     0
                 }
@@ -329,16 +327,16 @@ impl Service {
 
     async fn prepare(
         &self,
-        problem: Arc<Problem>,
+        task: Arc<Task>,
         test_id: usize,
         log_state: Arc<LogState>,
     ) -> Result<Box<dyn Enviroment>> {
-        Ok(match problem.r#type {
+        Ok(match task.r#type {
             submission::Type::Standard => Box::from(
                 standard::prepare(
                     Arc::clone(&self.sandboxes),
-                    problem.lang,
-                    problem.limits,
+                    task.lang,
+                    task.limits,
                     self.work_dir.clone(),
                     test_id,
                     log_state,
@@ -349,8 +347,8 @@ impl Service {
             submission::Type::Interactive => Box::from(
                 interactive::prepare(
                     Arc::clone(&self.sandboxes),
-                    problem.lang,
-                    problem.limits,
+                    task.lang,
+                    task.limits,
                     self.work_dir.clone(),
                     test_id,
                     log_state,

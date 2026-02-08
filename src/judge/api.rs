@@ -124,7 +124,7 @@ pub mod submission {
     }
 
     #[derive(Debug, Deserialize)]
-    pub struct Problem {
+    pub struct Task {
         pub r#type: Type,
         pub lang: Lang,
         pub limits: Limits,

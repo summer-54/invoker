@@ -95,7 +95,7 @@ VERDICT <verdict: {APPROVED, DENIED}>
 ```
 TYPE START
 DATA
-<binary data: tar: problem_template>
+<binary data: tar: task_template>
 ```
 ### Stop task
 ```
@@ -176,9 +176,9 @@ MESSAGE <exit data>
 | RE   | runtime error         | no         |
 | CE   | compile error         | no         |
 | TE   | testing system error  | no         |
-# Problems
+# tasks
 ``` files
-problem_template
+task_template
 ├── config.yaml
 ├── checker.out/interactive.out
 ├── [OPTION][type: standart] correct
@@ -198,7 +198,7 @@ problem_template
 
 ## Checker & Interactor
 use __polygon.codeforces__ standart
-but _interactive_ problems doesn't have checker
+but _interactive_ tasks doesn't have checker
 
 ## `config.yaml`
 ### Template
@@ -236,16 +236,16 @@ groups:
 
 | Field    | Type            | Description          |
 | -------- | --------------- | -------------------- |
-| `type`   | `ProblemType`   | Problem type         |
+| `type`   | `taskType`   | task type         |
 | `lang`   | `Lang`          | Compiler name        |
-| `limits` | `ProblemLimits` | Limits for solutiuon |
+| `limits` | `taskLimits` | Limits for solutiuon |
 | `groups` | \[Group]        | Groups configs       |
-## `ProblemType`
+## `taskType`
 - `standard`
 - `interactive`
 ## `Lang`
 - `g++`
-## `ProblemLimits`
+## `taskLimits`
 
 | Field       | Type    | Description             |
 | ----------- | ------- | ----------------------- |
