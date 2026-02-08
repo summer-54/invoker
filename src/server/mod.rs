@@ -26,10 +26,7 @@ pub mod income {
             match self {
                 Self::Challenge(challenge) => f
                     .debug_struct("Challenge")
-                    .field(
-                        "data",
-                        &Box::<[u8]>::from(short_slice_u8(&challenge.bytes())),
-                    )
+                    .field("data", &Box::<[u8]>::from(short_slice_u8(&*challenge)))
                     .finish(),
                 Self::Start { data } => f
                     .debug_struct("Start")
@@ -58,6 +55,7 @@ pub mod income {
 #[allow(dead_code)]
 pub mod outgo {
     use colored::Colorize;
+    use invoker_auth::Solution;
 
     use super::{Result, VISIBLE_DATA_LEN};
     use crate::judge::api::test::Verdict;
@@ -78,7 +76,7 @@ pub mod outgo {
             token: uuid::Uuid,
             name: Box<str>,
         },
-        ChallengeSolution(Box<[u8]>),
+        ChallengeSolution(Solution),
         FullVerdict(FullVerdict),
         TestVerdict {
             test_id: usize,

@@ -174,7 +174,7 @@ impl outgo::Sender for Service {
                         }
                         outgo::Msg::ChallengeSolution(data) => {
                             map.push(("TYPE".into(), "AUTH".into()));
-                            msg_data = Some(data)
+                            msg_data = Some(Box::from(&*data))
                         }
                     }
                     serialize_msg(map.into_iter(), msg_data)
@@ -216,7 +216,7 @@ impl income::Receiver for Service {
                         log::error!("data not found");
                         continue;
                     };
-                    income::Msg::Challenge(Challenge::from_bytes(data))
+                    income::Msg::Challenge(Challenge::from(&*data))
                 }
                 "START" => {
                     let Some(data) = data else {
