@@ -1,2 +1,2 @@
-pub use anyhow::{Context, Result, anyhow, bail};
+pub use anyhow::{Context, Error, Result, anyhow, bail};
 pub use colored::Colorize;

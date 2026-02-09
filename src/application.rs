@@ -108,29 +108,30 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
+        use server::income::Msg;
         loop {
             log::info!("message listner open");
             let msg = self.receiver.recv().await.context("reading message")?;
             match msg {
-                server::income::Msg::AuthVerdict(verdict) => {
+                Msg::AuthVerdict(verdict) => {
                     if !verdict {
                         bail!("auth FAILED");
                     }
                 }
-                server::income::Msg::Challenge(challenge) => (&*self)
+                Msg::Challenge(challenge) => (&*self)
                     .solve_challenge(challenge)
                     .await
                     .context("solving auth challenge")?,
-                server::income::Msg::Start { data } => _ = self.start_judgment(data),
-                server::income::Msg::Stop => self
+                Msg::Start { data } => _ = self.start_judgment(data),
+                Msg::Stop => self
                     .judge_service
                     .cancel_all_tests()
                     .await
                     .context("all tests cancelling")?,
-                server::income::Msg::Close => break,
+                Msg::Close => break,
             }
         }
-        log::info!("message listner close close");
+        log::info!("message listner close");
         Result::<()>::Ok(())
     }
 }

@@ -1,7 +1,5 @@
 use crate::prelude::*;
 
-use std::collections::HashMap;
-
 use super::{income, outgo};
 
 pub use http::Uri;
@@ -21,46 +19,130 @@ use {
     },
 };
 
-fn deserialize_msg(mut buf: &[u8]) -> (HashMap<Box<str>, Box<str>>, Option<Box<[u8]>>) {
-    let mut map = HashMap::<Box<str>, Box<str>>::new();
+mod raw_msg {
+    use crate::prelude::*;
+    use std::{collections::HashMap, sync::Arc};
+    pub struct Msg {
+        map: HashMap<Arc<str>, usize>,
+        body: Body,
+    }
+    pub struct Body {
+        pub(self) r#type: Box<str>,
+        pub(self) fields: Vec<(Arc<str>, Box<str>)>,
+        pub(self) data: Option<Box<[u8]>>,
+    }
 
-    let data = loop {
-        let Some(endl_pos) = buf.iter().position(|&b| b == ('\n' as u8)) else {
-            break None;
-        };
-        let (line, other) = buf.split_at(endl_pos + 1);
-        buf = other;
+    impl TryFrom<&[u8]> for Body {
+        type Error = Error;
 
-        let line = String::from_utf8_lossy(line);
-        let (key, value) = line.split_once(' ').unwrap_or((&*line, ""));
-        let key = key.trim();
-        let value = value.trim();
+        fn try_from(mut buf: &[u8]) -> Result<Self> {
+            let mut fields = Vec::<(Arc<str>, Box<str>)>::new();
+            let mut r#type = Option::<Box<str>>::None;
+            let data = loop {
+                let Some(endl_pos) = buf.iter().position(|&b| b == ('\n' as u8)) else {
+                    break None;
+                };
 
-        if key == "DATA" {
-            break Some(buf.into());
-        } else {
-            map.insert(key.into(), value.into());
+                let (line, other) = buf.split_at(endl_pos + 1);
+                buf = other;
+
+                let line = String::from_utf8_lossy(line);
+                let (key, value) = line.split_once(' ').unwrap_or((&*line, ""));
+                let key = key.trim();
+                let value = value.trim();
+
+                match key {
+                    "DATA" => break Some(buf.into()),
+                    "TPYE" => r#type = Some(value.into()),
+                    _ => fields.push((key.into(), value.into())),
+                }
+            };
+
+            let Some(r#type) = r#type else {
+                bail!("cannot parse raw msg, field 'TYPE' not found")
+            };
+
+            Ok(Self {
+                r#type,
+                fields: fields,
+                data,
+            })
         }
-    };
-
-    (map, data)
-}
-
-fn serialize_msg(
-    iter: impl std::iter::Iterator<Item = (Box<str>, Box<str>)>,
-    data: Option<Box<[u8]>>,
-) -> Box<[u8]> {
-    let mut buf = vec![];
-    for (k, v) in iter {
-        buf.append(&mut format!("{k} {v}\n").as_bytes().to_vec());
     }
-    if let Some(data) = data {
-        buf.append(&mut "DATA\n".as_bytes().to_vec());
-        buf.append(&mut data.to_vec());
-    }
-    buf.into_boxed_slice()
-}
 
+    impl Body {
+        pub fn new(r#type: impl ToString) -> Self {
+            Self {
+                r#type: r#type.to_string().into_boxed_str(),
+                fields: vec![],
+                data: None,
+            }
+        }
+        pub fn into_bytes(self) -> Box<[u8]> {
+            let mut buf = format!("TYPE {}\n", self.r#type).as_bytes().to_vec();
+            for (k, v) in self.fields {
+                buf.append(&mut format!("{k} {v}\n").as_bytes().to_vec());
+            }
+            if let Some(data) = self.data {
+                buf.append(&mut "DATA\n".as_bytes().to_vec());
+                buf.append(&mut data.to_vec());
+            }
+            buf.into_boxed_slice()
+        }
+
+        pub fn add_field(&mut self, name: &dyn ToString, value: &dyn ToString) -> &mut Self {
+            self.fields
+                .push((name.to_string().into(), value.to_string().into()));
+            self
+        }
+        pub fn add_fields(&mut self, fields: Vec<(&dyn ToString, &dyn ToString)>) -> &mut Self {
+            for (name, value) in fields {
+                self.add_field(name, value);
+            }
+            self
+        }
+        pub fn set_data(&mut self, data: Box<[u8]>) -> &mut Self {
+            self.data = Some(data);
+            self
+        }
+    }
+    impl From<Body> for Msg {
+        fn from(body: Body) -> Self {
+            Msg {
+                map: body
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (k, _))| (Arc::clone(k), i))
+                    .collect(),
+                body,
+            }
+        }
+    }
+    impl TryFrom<&[u8]> for Msg {
+        type Error = Error;
+        fn try_from(value: &[u8]) -> Result<Self> {
+            Ok(Self::from(Body::try_from(value)?))
+        }
+    }
+    impl Msg {
+        pub fn field(&self, name: &str) -> Option<&str> {
+            Some(&*self.body.fields[*self.map.get(name)?].1)
+        }
+        pub fn field_eq(&self, name: &str, value: &str) -> bool {
+            let Some(field) = self.field(name) else {
+                return false;
+            };
+            *field == *value
+        }
+        pub fn r#type(&self) -> &str {
+            &self.body.r#type
+        }
+        pub fn data(&self) -> Option<&[u8]> {
+            self.body.data.as_deref()
+        }
+    }
+}
 pub struct Service {
     read: Mutex<Receiver<TcpStream, DeflateDecoder>>,
     write: Mutex<Sender<TcpStream, DeflateEncoder>>,
@@ -99,6 +181,7 @@ impl Service {
         })
     }
 }
+
 impl outgo::Sender for Service {
     async fn send(&self, msg: outgo::Msg) -> Result<()> {
         log::info!("sending: {msg:?}");
@@ -107,38 +190,38 @@ impl outgo::Sender for Service {
             .await
             .write(
                 {
-                    let mut map = Vec::<(Box<str>, Box<str>)>::new();
-                    let mut msg_data = None;
-                    match msg {
+                    let body = match msg {
                         outgo::Msg::FullVerdict(verdict) => {
-                            map.push(("TYPE".into(), "VERDICT".into()));
+                            let mut body = raw_msg::Body::new("VERDICT");
                             match verdict {
                                 outgo::FullVerdict::Ok {
                                     score,
                                     groups_score,
                                 } => {
-                                    map.push(("NAME".into(), "OK".into()));
-                                    map.push(("SUM".into(), format!("{score}").into()));
-                                    map.push((
-                                        "GROUPS".into(),
-                                        String::from_utf8_lossy(
-                                            &*groups_score
-                                                .into_iter()
-                                                .flat_map(|score| format!("{score} ").into_bytes())
-                                                .collect::<Vec<u8>>(),
-                                        )
-                                        .into(),
-                                    ));
+                                    body.add_fields(vec![
+                                        (&"NAME", &"OK"),
+                                        (&"SUM", &score),
+                                        (
+                                            &"GROUPS",
+                                            &String::from_utf8_lossy(
+                                                &*groups_score
+                                                    .into_iter()
+                                                    .flat_map(|score| {
+                                                        format!("{score} ").into_bytes()
+                                                    })
+                                                    .collect::<Vec<u8>>(),
+                                            ),
+                                        ),
+                                    ]);
                                 }
                                 outgo::FullVerdict::Ce(msg) => {
-                                    map.push(("NAME".into(), "CE".into()));
-                                    map.push(("MESSAGE".into(), msg));
+                                    body.add_fields(vec![(&"NAME", &"CE"), (&"MESSAGE", &msg)]);
                                 }
                                 outgo::FullVerdict::Te(msg) => {
-                                    map.push(("NAME".into(), "TE".into()));
-                                    map.push(("MESSAGE".into(), msg));
+                                    body.add_fields(vec![(&"NAME", &"TE"), (&"MESSAGE", &msg)]);
                                 }
                             }
+                            body
                         }
                         outgo::Msg::TestVerdict {
                             test_id,
@@ -147,37 +230,43 @@ impl outgo::Sender for Service {
                             memory,
                             data,
                         } => {
-                            map.push(("TYPE".into(), "TEST".into()));
-                            map.push(("ID".into(), format!("{test_id}").into()));
-                            map.push(("VERDICT".into(), format!("{verdict}").into()));
-                            map.push(("TIME".into(), format!("{time}").into()));
-                            map.push(("MEMORY".into(), format!("{memory}").into()));
-                            msg_data = Some(data);
+                            let mut body = raw_msg::Body::new("TEST");
+                            body.add_fields(vec![
+                                (&"ID", &test_id),
+                                (&"VERDCIT", &verdict),
+                                (&"TIME", &time),
+                                (&"MEMORY", &memory),
+                            ])
+                            .set_data(data);
+                            body
                         }
                         outgo::Msg::Exited { code, data } => {
-                            map.push(("TYPE".into(), "EXITED".into()));
-                            map.push(("CODE".into(), format!("{code}").into()));
-                            map.push(("MESSAGE".into(), data));
+                            let mut body = raw_msg::Body::new("EXITED");
+                            body.add_fields(vec![(&"CODE", &code), (&"MESSAGE", &data)]);
+                            body
                         }
                         outgo::Msg::Error { msg } => {
-                            map.push(("TYPE".into(), "ERROR".into()));
-                            map.push(("MESSAGE".into(), msg));
+                            let mut body = raw_msg::Body::new("ERROR");
+                            body.add_field(&"MESSAGE", &msg);
+                            body
                         }
                         outgo::Msg::OpError { msg } => {
-                            map.push(("TYPE".into(), "OPERROR".into()));
-                            map.push(("MESSAGE".into(), msg));
+                            let mut body = raw_msg::Body::new("OPERROR");
+                            body.add_field(&"MESSAGE", &msg);
+                            body
                         }
                         outgo::Msg::Token { token, name } => {
-                            map.push(("TYPE".into(), "TOKEN".into()));
-                            map.push(("ID".into(), format!("{}", token.as_u128()).into()));
-                            map.push(("KEY".into(), name));
+                            let mut body = raw_msg::Body::new("TOKEN");
+                            body.add_fields(vec![(&"ID", &token.as_u128()), (&"KEY", &name)]);
+                            body
                         }
                         outgo::Msg::ChallengeSolution(data) => {
-                            map.push(("TYPE".into(), "AUTH".into()));
-                            msg_data = Some(Box::from(&*data))
+                            let mut body = raw_msg::Body::new("AUTH");
+                            body.set_data(Box::from(&*data));
+                            body
                         }
-                    }
-                    serialize_msg(map.into_iter(), msg_data)
+                    };
+                    body.into_bytes()
                 },
                 ratchet_rs::PayloadType::Binary,
             )
@@ -196,34 +285,31 @@ impl income::Receiver for Service {
                 .read(&mut msg)
                 .await
                 .context("reading websocket messages")?;
-            let (map, data) = deserialize_msg(&*msg);
-            let Some(msg_type) = map.get("TYPE") else {
-                log::error!("field 'TYPE' not found");
-                continue;
+            let msg = match raw_msg::Msg::try_from(&*msg) {
+                Ok(msg) => msg,
+                Err(err) => {
+                    log::error!("parsing websockets: {err}");
+                    continue;
+                }
             };
 
-            let msg = match &**msg_type {
-                "AUTH_VERDICT" => {
-                    income::Msg::AuthVerdict(if let Some(verdict) = map.get("VERDICT") {
-                        **verdict == *"APPROVED"
-                    } else {
-                        log::error!("field 'VERDICT' not found");
-                        continue;
-                    })
-                }
+            let msg = match msg.r#type() {
+                "AUTH_VERDICT" => income::Msg::AuthVerdict(msg.field_eq("VERDICT", "APPROVED")),
                 "AUTH_CHALLENGE" => {
-                    let Some(data) = data else {
+                    let Some(data) = msg.data() else {
                         log::error!("data not found");
                         continue;
                     };
                     income::Msg::Challenge(Challenge::from(&*data))
                 }
                 "START" => {
-                    let Some(data) = data else {
+                    let Some(data) = msg.data() else {
                         log::error!("data not found");
                         continue;
                     };
-                    income::Msg::Start { data }
+                    income::Msg::Start {
+                        data: Box::from(data),
+                    }
                 }
                 "STOP" => income::Msg::Stop,
                 "CLOSE" => income::Msg::Close,
