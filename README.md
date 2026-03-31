@@ -82,6 +82,7 @@ compilation_commands:
 Target web-socket client at `ws://$INVOKER_MANAGER_HOST`
 ### Authenticate challenge
 ```
+CONN AUTH
 TYPE AUTH_CHALLENGE
 DATA
 <binary data: challenge>
