@@ -27,7 +27,7 @@ mod raw_msg {
         body: Body,
     }
     pub struct Body {
-        pub(self) r#type: Box<str>,
+        pub(self) ty: Box<str>,
         pub(self) fields: Vec<(Arc<str>, Box<str>)>,
         pub(self) data: Option<Box<[u8]>>,
     }
@@ -37,7 +37,7 @@ mod raw_msg {
 
         fn try_from(mut buf: &[u8]) -> Result<Self> {
             let mut fields = Vec::<(Arc<str>, Box<str>)>::new();
-            let mut r#type = Option::<Box<str>>::None;
+            let mut ty = Option::<Box<str>>::None;
             let data = loop {
                 let Some(endl_pos) = buf.iter().position(|&b| b == ('\n' as u8)) else {
                     break None;
@@ -53,17 +53,17 @@ mod raw_msg {
 
                 match key {
                     "DATA" => break Some(buf.into()),
-                    "TPYE" => r#type = Some(value.into()),
+                    "TPYE" => ty = Some(value.into()),
                     _ => fields.push((key.into(), value.into())),
                 }
             };
 
-            let Some(r#type) = r#type else {
+            let Some(ty) = ty else {
                 bail!("cannot parse raw msg, field 'TYPE' not found")
             };
 
             Ok(Self {
-                r#type,
+                ty,
                 fields: fields,
                 data,
             })
@@ -71,15 +71,15 @@ mod raw_msg {
     }
 
     impl Body {
-        pub fn new(r#type: impl ToString) -> Self {
+        pub fn new(ty: impl ToString) -> Self {
             Self {
-                r#type: r#type.to_string().into_boxed_str(),
+                ty: ty.to_string().into_boxed_str(),
                 fields: vec![],
                 data: None,
             }
         }
         pub fn into_bytes(self) -> Box<[u8]> {
-            let mut buf = format!("TYPE {}\n", self.r#type).as_bytes().to_vec();
+            let mut buf = format!("TYPE {}\n", self.ty).as_bytes().to_vec();
             for (k, v) in self.fields {
                 buf.append(&mut format!("{k} {v}\n").as_bytes().to_vec());
             }
@@ -135,8 +135,8 @@ mod raw_msg {
             };
             *field == *value
         }
-        pub fn r#type(&self) -> &str {
-            &self.body.r#type
+        pub fn ty(&self) -> &str {
+            &self.body.ty
         }
         pub fn data(&self) -> Option<&[u8]> {
             self.body.data.as_deref()
@@ -293,7 +293,7 @@ impl income::Receiver for Service {
                 }
             };
 
-            let msg = match msg.r#type() {
+            let msg = match msg.ty() {
                 "AUTH_VERDICT" => income::Msg::AuthVerdict(msg.field_eq("VERDICT", "APPROVED")),
                 "AUTH_CHALLENGE" => {
                     let Some(data) = msg.data() else {

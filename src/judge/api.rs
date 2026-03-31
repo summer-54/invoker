@@ -125,7 +125,9 @@ pub mod submission {
 
     #[derive(Debug, Deserialize)]
     pub struct Task {
-        pub r#type: Type,
+        #[serde(rename = "type")]
+        pub ty: Type,
+
         pub lang: Lang,
         pub limits: Limits,
         pub groups: Box<[Group]>,

@@ -331,7 +331,7 @@ impl Service {
         test_id: usize,
         log_state: Arc<LogState>,
     ) -> Result<Box<dyn Enviroment>> {
-        Ok(match task.r#type {
+        Ok(match task.ty {
             submission::Type::Standard => Box::from(
                 standard::prepare(
                     Arc::clone(&self.sandboxes),
