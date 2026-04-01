@@ -1,7 +1,8 @@
 use crate::prelude::*;
 
 use super::{
-    Body, Message, MultiplexChannel, RawMessage, Stream, UnboundedSender, unbounded_channel,
+    MappedRawMessage, MultiplexChannel, RawMessage,
+    stream::{Income, Outgo, Stream},
 };
 
 pub use http::Uri;
@@ -15,13 +16,16 @@ use {
     },
     tokio::{
         net::{TcpStream, ToSocketAddrs},
-        sync::Mutex,
+        sync::{
+            Mutex,
+            mpsc::{UnboundedSender, unbounded_channel},
+        },
     },
 };
 const MAX_MESSAGE_SIZE: usize = 1 << 31;
 
 pub struct Channel {
-    streams: Mutex<HashMap<Box<str>, UnboundedSender<Box<str>>>>,
+    streams: Mutex<HashMap<Box<str>, UnboundedSender<RawMessage>>>,
     read: Mutex<Receiver<TcpStream, DeflateDecoder>>,
     write: Mutex<Sender<TcpStream, DeflateEncoder>>,
 }
@@ -62,33 +66,35 @@ impl Channel {
 }
 
 impl super::Sender for Channel {
-    async fn send(&self, stream: Box<str>, body: Body) -> Result<()> {
+    async fn send(&self, stream: &str, body: RawMessage) -> Result<()> {
         log::info!("sending: [stream: {stream}] {body:?}");
         self.write
             .lock()
             .await
-            .write(body.into_bytes(), ratchet_rs::PayloadType::Binary)
+            .write(
+                stream
+                    .bytes()
+                    .chain(body.into_bytes())
+                    .collect::<Box<[u8]>>(),
+                ratchet_rs::PayloadType::Binary,
+            )
             .await
             .context("websocket message sending")?;
         Ok(())
     }
 }
 
-impl MultiplexChannel for Channel {
-    async fn new_stream<M: Message>(self: Arc<Self>, name: &str) -> Stream<M, Self> {
+impl super::MultiplexChannel for Channel {
+    async fn new_stream<I: Income, O: Outgo>(self: &Arc<Self>, name: &str) -> Stream<I, O, Self> {
         let (sender, receiver) = unbounded_channel();
-        self.streams.lock().await.insert(Box::from(name), sender);
-        Stream {
-            _pd: Default::default(),
-            name: Box::from(name),
-            receiver: receiver,
-            service: Arc::downgrade(&self),
-        }
+        let mut streams = self.streams.lock().await;
+        streams.insert(Box::from(name), sender);
+        Stream::new(name, receiver, Arc::downgrade(&self))
     }
 }
 
 impl Channel {
-    async fn recv(&self) -> Result<(Box<str>, RawMessage)> {
+    pub async fn run(self: Arc<Self>) -> Result<()> {
         loop {
             let mut buf = bytes::BytesMut::new();
             self.read
@@ -101,8 +107,8 @@ impl Channel {
                 log::error!("message does not have any endl, so stream name cant be readed");
                 continue;
             };
-            let stream_name = String::from_utf8(buf[..endl_pos].into());
-            let msg = match RawMessage::try_from(&*buf[endl_pos..]) {
+            let stream_name = String::from_utf8(buf[..endl_pos].into())?;
+            let msg = match RawMessage::try_from(&buf[endl_pos..]) {
                 Ok(msg) => msg,
                 Err(err) => {
                     log::error!("parsing websockets: {err}");
@@ -110,8 +116,14 @@ impl Channel {
                 }
             };
 
-            log::info!("received message: {msg:?}");
-            return Ok(msg);
+            log::info!("received message: [stream_name: {stream_name}] {msg:?}");
+            let streams = self.streams.lock().await;
+            let Some(sender) = streams.get(&*stream_name) else {
+                log::error!("unknown stream name: {stream_name}");
+                continue;
+            };
+
+            sender.send(msg);
         }
     }
 }

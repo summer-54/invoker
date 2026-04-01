@@ -15,11 +15,13 @@ fn short_slice_u8(data: &[u8]) -> &[u8] {
     &data[..std::cmp::min(data.len(), VISIBLE_DATA_LEN)]
 }
 
+#[cfg(not(feature = "mock"))]
+use crate::server::websocket;
 use crate::{
     application::App,
     server::{
-        income,
-        outgo::{self, Sender},
+        MultiplexChannel,
+        stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo},
     },
 };
 
@@ -57,35 +59,22 @@ impl Config {
 }
 
 #[cfg(not(feature = "mock"))]
-async fn init_communnication(
-    token: Uuid,
-    config: Config,
-) -> Result<(Arc<impl income::Receiver>, Arc<impl outgo::Sender>)> {
-    let websocket_service = Arc::new(
-        server::websocket::Service::new(
+async fn init_communnication(config: Config) -> Result<Arc<websocket::Channel>> {
+    Ok(Arc::new(
+        server::websocket::Channel::new(
             config.manager_host.as_ref(),
             Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
         )
         .await?,
-    );
-
-    websocket_service
-        .send(server::outgo::Msg::Token {
-            token,
-            name: config.cert_name,
-        })
-        .await?;
-
-    Ok((websocket_service.clone(), websocket_service))
+    ))
 }
 
 #[cfg(feature = "mock")]
 async fn init_communnication(
-    _token: Uuid,
     _config: Config,
 ) -> Result<(Arc<impl income::Receiver>, Arc<impl outgo::Sender>)> {
     log::info!("{} communication initialized", "mock".bold());
-    Ok((Arc::new(income::MockReceiver), Arc::new(outgo::MockSender)))
+    Ok((Arc::new(server::MockChannel::new())))
 }
 
 #[tokio::main]
@@ -108,22 +97,34 @@ async fn main() -> Result<()> {
     let token = Uuid::new_v4();
     println!("\n[{}] invoker token\n", format!("{token}").yellow().bold());
 
-    let (receiver, sender) = init_communnication(token, config.clone()).await?;
+    let channel = init_communnication(config.clone()).await?;
     let cert = Cert::from_file(&*config.cert_path)?;
     let isolate_service =
         sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
     let app = App {
-        receiver,
-        sender,
+        channel: Arc::clone(&channel),
+        master_stream: channel
+            .new_stream::<MasterIncome, MasterOutgo>("master")
+            .await,
+        auth_stream: channel.new_stream::<AuthIncome, AuthOutgo>("master").await,
         judge_service: Arc::new(
             judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
         ),
         cert: Arc::new(cert),
     };
 
+    app.master_stream
+        .send(MasterOutgo::Token {
+            token,
+            name: config.cert_name,
+        })
+        .await?;
+
+    tokio::spawn(channel.run());
+
     let app = Arc::new(app);
-    let result = Arc::clone(&app).run();
+    let result = app.run();
     for name in std::env::args().skip(1) {
         app.start_judgment(
             tokio::fs::read(name.as_str())
@@ -137,8 +138,8 @@ async fn main() -> Result<()> {
 
     match result {
         Ok(_) => {
-            app.sender
-                .send(outgo::Msg::Exited {
+            app.master_stream
+                .send(MasterOutgo::Exited {
                     code: 0,
                     data: Box::from(""),
                 })
@@ -146,14 +147,13 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             log::error!("error: '{e:?}'");
-            app.sender
-                .send(outgo::Msg::Exited {
+            app.master_stream
+                .send(MasterOutgo::Exited {
                     code: 1,
                     data: format!("{e:?}").into_boxed_str(),
                 })
                 .await?
         }
     }
-
     Ok(())
 }

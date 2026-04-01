@@ -1,36 +1,36 @@
+pub mod stream;
 #[cfg(not(feature = "mock"))]
 pub mod websocket;
 
 use crate::prelude::*;
 use crate::short_slice_u8;
-use std::marker::PhantomData;
 use std::{
     collections::HashMap,
     sync::{Arc, Weak},
 };
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-
+use stream::{Income, Outgo, Stream};
 #[derive(Debug)]
-pub struct RawMessage {
+pub struct MappedRawMessage {
     map: HashMap<Arc<str>, usize>,
-    body: Body,
+    msg: RawMessage,
 }
 
-pub struct Body {
+pub struct RawMessage {
     pub(self) ty: Box<str>,
     pub(self) fields: Vec<(Arc<str>, Box<str>)>,
     pub(self) data: Option<Box<[u8]>>,
 }
-impl std::fmt::Debug for Body {
+impl std::fmt::Debug for RawMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = f.debug_struct(&*self.ty).field("fields", &**self.fields);
+        let mut s = f.debug_struct(&*self.ty);
+        s.field("fields", &self.fields);
         if let Some(data) = &self.data {
             s.field("data", &Box::<[u8]>::from(short_slice_u8(data)));
         }
         s.finish()
     }
 }
-impl TryFrom<&[u8]> for Body {
+impl TryFrom<&[u8]> for RawMessage {
     type Error = Error;
 
     fn try_from(mut buf: &[u8]) -> Result<Self> {
@@ -69,7 +69,7 @@ impl TryFrom<&[u8]> for Body {
     }
 }
 
-impl Body {
+impl RawMessage {
     pub fn new(ty: impl ToString) -> Self {
         Self {
             ty: ty.to_string().into_boxed_str(),
@@ -77,16 +77,20 @@ impl Body {
             data: None,
         }
     }
-    pub fn into_bytes(self) -> Box<[u8]> {
-        let mut buf = format!("TYPE {}\n", self.ty).as_bytes().to_vec();
-        for (k, v) in self.fields {
-            buf.append(&mut format!("{k} {v}\n").as_bytes().to_vec());
-        }
-        if let Some(data) = self.data {
-            buf.append(&mut "DATA\n".as_bytes().to_vec());
-            buf.append(&mut data.to_vec());
-        }
-        buf.into_boxed_slice()
+    pub fn into_bytes(self) -> impl Iterator<Item = u8> {
+        let buf = format!("TYPE {}\n", self.ty).into_bytes().into_iter();
+        let buf = buf
+            .chain(
+                self.fields
+                    .into_iter()
+                    .flat_map(|(k, v)| format!("{k} {v}\n").into_bytes()),
+            )
+            .chain(
+                self.data
+                    .into_iter()
+                    .flat_map(|data| "DATA\n".bytes().chain(data.into_iter())),
+            );
+        buf
     }
 
     pub fn add_field(&mut self, name: &dyn ToString, value: &dyn ToString) -> &mut Self {
@@ -104,29 +108,34 @@ impl Body {
         self.data = Some(data);
         self
     }
-}
-impl From<Body> for RawMessage {
-    fn from(body: Body) -> Self {
-        RawMessage {
-            map: body
+    pub fn into_mapped(self) -> MappedRawMessage {
+        MappedRawMessage {
+            map: self
                 .fields
                 .iter()
                 .enumerate()
                 .map(|(i, (k, _))| (Arc::clone(k), i))
                 .collect(),
-            body,
+            msg: self,
         }
     }
 }
-impl TryFrom<&[u8]> for RawMessage {
-    type Error = Error;
-    fn try_from(value: &[u8]) -> Result<Self> {
-        Ok(Self::from(Body::try_from(value)?))
+
+impl From<RawMessage> for MappedRawMessage {
+    fn from(value: RawMessage) -> MappedRawMessage {
+        value.into_mapped()
     }
 }
-impl RawMessage {
+
+impl TryFrom<&[u8]> for MappedRawMessage {
+    type Error = Error;
+    fn try_from(value: &[u8]) -> Result<Self> {
+        Ok(Self::from(RawMessage::try_from(value)?))
+    }
+}
+impl MappedRawMessage {
     pub fn field(&self, name: &str) -> Option<&str> {
-        Some(&*self.body.fields[*self.map.get(name)?].1)
+        Some(&*self.msg.fields[*self.map.get(name)?].1)
     }
     pub fn field_eq(&self, name: &str, value: &str) -> bool {
         let Some(field) = self.field(name) else {
@@ -135,38 +144,20 @@ impl RawMessage {
         *field == *value
     }
     pub fn ty(&self) -> &str {
-        &self.body.ty
+        &self.msg.ty
     }
     pub fn data(&self) -> Option<&[u8]> {
-        self.body.data.as_deref()
+        self.msg.data.as_deref()
     }
 }
 
-trait Message: TryFrom<RawMessage> + Into<Body> {}
-
-struct Stream<M: Message, C: MultiplexChannel> {
-    _pd: PhantomData<M>,
-    name: Box<str>,
-    receiver: UnboundedReceiver<Box<str>>,
-    service: Weak<C>,
-}
-
-impl<M: Message, C: MultiplexChannel> Stream<M, C> {
-    async fn send(&self, msg: M) -> Result<()> {
-        self.service.upgrade()?.send(self.name, msg.into()).await;
-    }
-    async fn recv(&self) -> Result<M> {
-        Ok(self.receiver.recv().await?.into())
-    }
-}
-
-pub trait MultiplexChannel: Sender {
-    fn new_stream<M: Message>(
-        self: Arc<Self>,
+pub trait MultiplexChannel: Sender + Sized + 'static {
+    fn new_stream<I: Income, O: Outgo>(
+        self: &Arc<Self>,
         name: &str,
-    ) -> impl Future<Output = Stream<M, Self>> + Send;
+    ) -> impl Future<Output = Stream<I, O, Self>> + Send;
 }
 
 trait Sender: Send + Sync {
-    fn send(&self, stream: Box<str>, body: Body) -> impl Future<Output = Result<()>> + Send;
+    fn send(&self, stream: &str, body: RawMessage) -> impl Future<Output = Result<()>> + Send;
 }

@@ -78,49 +78,44 @@ compilation_commands:
 - `INVOKER_WORK_DIR: DirPath`  for example `invoker`
 - `INVOKER_ISOLATE_EXE_PATH: Path`  for example `.local/bin/isolate`
 # Api
-## Incoming
 Target web-socket client at `ws://$INVOKER_MANAGER_HOST`
-### Authenticate challenge
+
 ```
-CONN AUTH
-TYPE AUTH_CHALLENGE
-DATA
-<binary data: challenge>
+<stream name>
+<message>
 ```
-### Authenticate verdict
+
+## Master
+
+### Incoming
+#### Start task
 ```
-TYPE AUTH_VERDICT
-VERDICT <verdict: {APPROVED, DENIED}>
-```
-### Start task
-```
+master
 TYPE START
 DATA
 <binary data: tar: task_template>
 ```
-### Stop task
+#### Stop task
 ```
+master
 TYPE STOP
 ```
-### Close invoker
+#### Close invoker
 ```
+master
 TYPE CLOSE
 ```
-## Outgoing
-### Sending token
+### Outgoing
+#### Sending token
 ```
+master
 TYPE TOKEN
 ID <token: uuid>
 KEY <name: str>
 ```
-###  Authenticate
+#### Test verdict
 ```
-TYPE AUTH
-DATA
-<bytes>
-```
-### Test verdict
-```
+master
 TYPE TEST
 ID <id>
 VERDICT <verdict>
@@ -129,8 +124,9 @@ MEMORY <memory>
 DATA
 <data: tar: (output, message)>
 ```
-### Full verdict
+#### Full verdict
 ```
+master
 TYPE VERDICT
 NAME OK
 SUM <score>
@@ -138,32 +134,61 @@ GROUPS <score group 0> <score group 1> ... <score group n>
 ```
 or
 ```
+master
 TYPE VERDICT
 NAME CE
 MESSAGE <message>
 ```
 or
 ```
+master
 TYPE VERDICT
 NAME TE
 MESSAGE <message>
 ```
-### Invoker error
+#### Invoker error
 ```
+master
 TYPE ERROR
 MESSAGE <error message>
 ```
-### Operator error
+#### Operator error
 ```
+master
 TYPE OPERROR
 MESSAGE <error message>
 ```
-### Exited
+#### Exited
 ```
+master
 TYPE EXITED
 CODE <exit code>
 MESSAGE <exit data>
 ```
+## Auth
+### Incoming
+#### Authenticate challenge
+```
+auth
+TYPE AUTH_CHALLENGE
+DATA
+<binary data: challenge>
+```
+#### Authenticate verdict
+```
+auth
+TYPE AUTH_VERDICT
+VERDICT <verdict: {APPROVED, DENIED}>
+```
+
+### Outgoing
+####  Authenticate
+```
+TYPE AUTH
+DATA
+<bytes>
+```
+
 
 ## Verdicts:
 
@@ -266,8 +291,4 @@ groups:
 
 ### `GroupId`
 `usize`
-Numbering starts from __zero__!!!
-
-### `TestId`
-`usize`
-Numbering starts with __one__!!!
+Numbering starts 
