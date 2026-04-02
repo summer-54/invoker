@@ -4,10 +4,7 @@ pub mod websocket;
 
 use crate::prelude::*;
 use crate::short_slice_u8;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-};
+use std::{collections::HashMap, sync::Arc};
 use stream::{Income, Outgo, Stream};
 #[derive(Debug)]
 pub struct MappedRawMessage {
@@ -151,13 +148,9 @@ impl MappedRawMessage {
     }
 }
 
-pub trait MultiplexChannel: Sender + Sized + 'static {
+pub trait MultiplexChannel: Sized + Send + Sync + 'static {
     fn new_stream<I: Income, O: Outgo>(
         self: &Arc<Self>,
         name: &str,
-    ) -> impl Future<Output = Stream<I, O, Self>> + Send;
-}
-
-trait Sender: Send + Sync {
-    fn send(&self, stream: &str, body: RawMessage) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = Stream<I, O>> + Send;
 }

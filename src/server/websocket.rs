@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use super::{
-    MappedRawMessage, MultiplexChannel, RawMessage,
+    RawMessage,
     stream::{Income, Outgo, Stream},
 };
 
@@ -65,31 +65,22 @@ impl Channel {
     }
 }
 
-impl super::Sender for Channel {
-    async fn send(&self, stream: &str, body: RawMessage) -> Result<()> {
-        log::info!("sending: [stream: {stream}] {body:?}");
-        self.write
-            .lock()
-            .await
-            .write(
-                stream
-                    .bytes()
-                    .chain(body.into_bytes())
-                    .collect::<Box<[u8]>>(),
-                ratchet_rs::PayloadType::Binary,
-            )
-            .await
-            .context("websocket message sending")?;
-        Ok(())
-    }
-}
-
 impl super::MultiplexChannel for Channel {
-    async fn new_stream<I: Income, O: Outgo>(self: &Arc<Self>, name: &str) -> Stream<I, O, Self> {
+    async fn new_stream<I: Income, O: Outgo>(self: &Arc<Self>, name: &str) -> Stream<I, O> {
         let (sender, receiver) = unbounded_channel();
         let mut streams = self.streams.lock().await;
         streams.insert(Box::from(name), sender);
-        Stream::new(name, receiver, Arc::downgrade(&self))
+        let this = self.clone();
+        let name_boxed = Box::<str>::from(name);
+        Stream::new(
+            receiver,
+            Box::new(move |msg: O| {
+                let this_clone = this.clone();
+                let name_clone = name_boxed.clone();
+                log::info!("sending: [stream: {name_boxed}] {msg:?}");
+                Box::pin(this_clone.send(name_clone, msg.into_raw())) as super::stream::SendResult
+            }),
+        )
     }
 }
 
@@ -123,7 +114,19 @@ impl Channel {
                 continue;
             };
 
-            sender.send(msg);
+            sender.send(msg)?;
         }
+    }
+    async fn send(self: Arc<Self>, name: Box<str>, msg: RawMessage) -> Result<()> {
+        self.write
+            .lock()
+            .await
+            .write(
+                name.bytes().chain(msg.into_bytes()).collect::<Box<[u8]>>(),
+                ratchet_rs::PayloadType::Binary,
+            )
+            .await
+            .context("websocket message sending")?;
+        Result::<()>::Ok(())
     }
 }

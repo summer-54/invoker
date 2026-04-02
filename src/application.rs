@@ -8,21 +8,20 @@ use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 use crate::{
     Result, judge,
     server::{
-        self, MultiplexChannel,
+        self,
         stream::{AuthStream, MasterStream, master::FullVerdict},
     },
 };
 use tar_archive_rs::{self as archive, ArchiveItem};
 
-pub struct App<C: MultiplexChannel> {
-    pub channel: Arc<C>,
-    pub master_stream: MasterStream<C>,
-    pub auth_stream: AuthStream<C>,
+pub struct App {
+    pub master_stream: MasterStream,
+    pub auth_stream: AuthStream,
     pub judge_service: Arc<judge::Service>,
     pub cert: Arc<Cert>,
 }
 
-impl<C: MultiplexChannel> App<C> {
+impl App {
     pub fn start_judgment(
         self: &Arc<Self>,
         data: Box<[u8]>,
@@ -112,19 +111,14 @@ impl<C: MultiplexChannel> App<C> {
 
     async fn listen_master_stream(self: Arc<Self>) -> Result<()> {
         use server::stream::master::Income;
+        log::info!("master channel listener open");
         loop {
-            log::info!("message listner open");
-            let msg = self.master_stream.recv().await.context("reading message")?;
+            let msg = self
+                .master_stream
+                .recv()
+                .await
+                .context("reading master message")?;
             match msg {
-                // Msg::AuthVerdict(verdict) => {
-                //     if !verdict {
-                //         bail!("auth FAILED");
-                //     }
-                // }
-                // Msg::Challenge(challenge) => (&*self)
-                //     .solve_challenge(challenge)
-                //     .await
-                //     .context("solving auth challenge")?,
                 Income::Start { data } => _ = self.start_judgment(data),
                 Income::Stop => self
                     .judge_service
@@ -139,8 +133,26 @@ impl<C: MultiplexChannel> App<C> {
     }
 
     async fn listen_auth_stream(self: Arc<Self>) -> Result<()> {
-        loop {}
-        Result::<()>::Ok(())
+        use server::stream::auth::Income;
+        log::info!("auth channel listener open");
+        loop {
+            let msg = self
+                .auth_stream
+                .recv()
+                .await
+                .context("reading auth message")?;
+            match msg {
+                Income::AuthVerdict(verdict) => {
+                    if !verdict {
+                        bail!("auth FAILED");
+                    }
+                }
+                Income::Challenge(challenge) => (&*self)
+                    .solve_challenge(challenge)
+                    .await
+                    .context("solving auth challenge")?,
+            }
+        }
     }
 
     pub async fn run(self: &Arc<Self>) -> Result<()> {

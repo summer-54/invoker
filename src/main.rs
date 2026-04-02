@@ -103,7 +103,6 @@ async fn main() -> Result<()> {
         sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
     let app = App {
-        channel: Arc::clone(&channel),
         master_stream: channel
             .new_stream::<MasterIncome, MasterOutgo>("master")
             .await,
