@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{prelude::*, server::MultiplexChannel};
 
 use std::sync::Arc;
 
@@ -6,7 +6,8 @@ use invoker_auth::{Cert, Challenge, policy};
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
 use crate::{
-    Result, judge,
+    Result, file,
+    judge::{self, Lang},
     server::{
         self,
         stream::{AuthStream, MasterStream, master::FullVerdict},
@@ -14,17 +15,22 @@ use crate::{
 };
 use tar_archive_rs::{self as archive, ArchiveItem};
 
-pub struct App {
-    pub master_stream: MasterStream,
-    pub auth_stream: AuthStream,
+pub struct App<C: MultiplexChannel, P: file::Provider> {
+    pub master_stream: MasterStream<C>,
+    pub auth_stream: AuthStream<C>,
     pub judge_service: Arc<judge::Service>,
     pub cert: Arc<Cert>,
+    pub file_provider: P,
 }
 
-impl App {
+impl<C: MultiplexChannel + Sized + Send + Sync + 'static, P: file::Provider + Sync + Send + 'static>
+    App<C, P>
+{
     pub fn start_judgment(
         self: &Arc<Self>,
-        data: Box<[u8]>,
+        lang: Lang,
+        solution: Box<[u8]>,
+        package: Box<[u8]>,
     ) -> JoinHandle<crate::Result<judge::api::submission::Result>> {
         use server::stream::MasterOutgo as Outgo;
         let self_clone = Arc::clone(&self);
@@ -62,9 +68,9 @@ impl App {
         let self_clone = Arc::clone(&self);
 
         tokio::spawn(async move {
-            let package = archive::Archive::new(&*data);
+            let package = archive::Archive::new(&*package);
             let result = Arc::clone(&self_clone.judge_service)
-                .judge(package, sender)
+                .judge(package, lang, solution, sender)
                 .await;
             _ = handler.await;
             match &result {
@@ -119,7 +125,14 @@ impl App {
                 .await
                 .context("reading master message")?;
             match msg {
-                Income::Start { data } => _ = self.start_judgment(data),
+                Income::Start {
+                    package_id,
+                    lang,
+                    data,
+                } => {
+                    let package = self.file_provider.get(package_id).await?;
+                    _ = self.start_judgment(lang, data, package)
+                }
                 Income::Stop => self
                     .judge_service
                     .cancel_all_tests()
@@ -142,7 +155,7 @@ impl App {
                 .await
                 .context("reading auth message")?;
             match msg {
-                Income::AuthVerdict(verdict) => {
+                Income::Verdict(verdict) => {
                     if !verdict {
                         bail!("auth FAILED");
                     }

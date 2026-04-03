@@ -1,4 +1,8 @@
-use crate::{judge::api::test::Verdict, prelude::*, short_slice_u8};
+use crate::{
+    judge::{Lang, api::test::Verdict},
+    prelude::*,
+    short_slice_u8,
+};
 
 use super::{MappedRawMessage, RawMessage};
 #[derive(Debug)]
@@ -11,7 +15,11 @@ pub enum FullVerdict {
     Te(Box<str>),
 }
 pub enum Income {
-    Start { data: Box<[u8]> },
+    Start {
+        package_id: crate::file::Id,
+        lang: crate::judge::Lang,
+        data: Box<[u8]>,
+    },
     Stop,
     Close,
 }
@@ -19,8 +27,14 @@ pub enum Income {
 impl std::fmt::Debug for Income {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Start { data } => f
+            Self::Start {
+                lang,
+                package_id,
+                data,
+            } => f
                 .debug_struct("Start")
+                .field("package_id", package_id)
+                .field("lang", lang)
                 .field("data", &Box::<[u8]>::from(short_slice_u8(&data)))
                 .finish(),
             Self::Stop => write!(f, "Stop"),
@@ -36,7 +50,15 @@ impl super::Income for Income {
                 let Some(data) = msg.data() else {
                     bail!("data not found");
                 };
+                let Some(lang) = msg.field("LANG") else {
+                    bail!("LANG field not found");
+                };
+                let Some(package_id) = msg.field("PACKAGE") else {
+                    bail!("PACKAGE field not found");
+                };
                 Self::Start {
+                    package_id: package_id.parse()?,
+                    lang: Lang::try_from(lang)?,
                     data: Box::from(data),
                 }
             }

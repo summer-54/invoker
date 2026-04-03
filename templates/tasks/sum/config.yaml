@@ -2,6 +2,8 @@ type: standard
 
 lang: g++
 
+package_id: 123
+
 limits:
   time: 2
   real_time: 2

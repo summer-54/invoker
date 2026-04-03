@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use crate::channel::Channel;
 use async_trait::async_trait;
@@ -7,33 +7,18 @@ use tokio::{fs::File, io::AsyncReadExt as _};
 use super::{
     CHANNEL_DIR, Lang, SOLUTION_EXT, SOLUTION_NAME,
     api::{submission, test},
-    path_from,
 };
 use crate::{
     LogState, Result,
     sandbox::{self, MaybeLimited, RunStatus},
 };
-
-const TEST_DIR: &str = "test";
-const TEST_EXT: Option<&str> = Some("txt");
-
-const INTERACTOR_NAME: &str = "interactor";
-const INTERACTOR_EXT: Option<&str> = Some("out");
-
-const TARGET_TEST_PATH: &str = "test.txt";
-const TARGET_INTERACTOR_OUTPUT_PATH: &str = "interactor_out.txt";
-const TARGET_INTERACTOR_ERROR_PATH: &str = "interactor_err.txt";
-
-const TARGET_INTERACTOR_PATH: &str = "interactor.out";
-const TARGET_SOLUTION_PATH: &str = "solution.out";
-
 pub struct Enviroment {
     sandbox: Arc<sandbox::Sandbox>,
     interactor_sandbox: Arc<sandbox::Sandbox>,
     limits: submission::Limits,
     lang: Lang,
 
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
     test_id: usize,
     log_state: Arc<LogState>,
 }
@@ -42,7 +27,7 @@ pub async fn prepare(
     sandboxes: Arc<sandbox::Service>,
     lang: Lang,
     limits: submission::Limits,
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
 
     test_id: usize,
     log_state: Arc<LogState>,
@@ -70,16 +55,35 @@ pub async fn prepare(
 #[async_trait]
 impl super::Enviroment for Enviroment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
+        const TEST_DIR: &str = "test";
+        const TEST_EXT: &str = "txt";
+
+        const INTERACTOR_NAME: &str = "interactor";
+        const INTERACTOR_EXT: &str = "out";
+
+        const TARGET_TEST_PATH: &str = "test.txt";
+        const TARGET_INTERACTOR_OUTPUT_PATH: &str = "interactor_out.txt";
+        const TARGET_INTERACTOR_ERROR_PATH: &str = "interactor_err.txt";
+
+        const TARGET_INTERACTOR_PATH: &str = "interactor.out";
+        const TARGET_SOLUTION_PATH: &str = "solution.out";
+
         let log_state = self.log_state.push("task type", "INTERACTIVE");
 
-        let src_test_path = path_from(
-            &format!("{}/{}", self.work_dir, TEST_DIR),
-            &format!("{}", self.test_id + 1),
-            TEST_EXT,
-        );
+        let src_test_path = self
+            .work_dir
+            .join(TEST_DIR)
+            .join(format!("{}", self.test_id + 1))
+            .with_extension(TEST_EXT);
 
-        let src_interactor_path = path_from(&self.work_dir, INTERACTOR_NAME, INTERACTOR_EXT);
-        let src_solution_path = path_from(&self.work_dir, SOLUTION_NAME, SOLUTION_EXT);
+        let src_interactor_path = self
+            .work_dir
+            .join(INTERACTOR_NAME)
+            .with_extension(INTERACTOR_EXT);
+        let src_solution_path = self
+            .work_dir
+            .join(SOLUTION_NAME)
+            .with_extension(SOLUTION_EXT);
 
         Arc::clone(&self.interactor_sandbox)
             .write_group_into_box(
@@ -91,7 +95,7 @@ impl super::Enviroment for Enviroment {
                     ),
                 ]
                 .into_iter()
-                .map(|(from, to)| (from, Box::from(to)))
+                .map(|(from, to)| (from, Path::new(to)))
                 .collect(),
             )
             .await?;

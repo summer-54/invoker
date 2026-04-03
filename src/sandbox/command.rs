@@ -1,4 +1,5 @@
 use super::MaybeLimited;
+use crate::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct Command {
@@ -16,9 +17,9 @@ pub struct Command {
 
     pub(super) open_dirs: Vec<Box<str>>,
 
-    pub(super) stdin: Option<Box<str>>,
-    pub(super) stdout: Option<Box<str>>,
-    pub(super) stderr: Option<Box<str>>,
+    pub(super) stdin: Option<Box<Path>>,
+    pub(super) stdout: Option<Box<Path>>,
+    pub(super) stderr: Option<Box<Path>>,
 }
 
 #[allow(dead_code)]
@@ -56,17 +57,17 @@ impl Command {
         self
     }
 
-    pub fn stdin(&mut self, path: impl AsRef<str>) -> &mut Self {
+    pub fn stdin(&mut self, path: impl AsRef<Path>) -> &mut Self {
         self.stdin = Some(Box::from(path.as_ref()));
         self
     }
 
-    pub fn stdout(&mut self, path: impl AsRef<str>) -> &mut Self {
+    pub fn stdout(&mut self, path: impl AsRef<Path>) -> &mut Self {
         self.stdout = Some(Box::from(path.as_ref()));
         self
     }
 
-    pub fn stderr(&mut self, path: impl AsRef<str>) -> &mut Self {
+    pub fn stderr(&mut self, path: impl AsRef<Path>) -> &mut Self {
         self.stdout = Some(Box::from(path.as_ref()));
         self
     }

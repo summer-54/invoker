@@ -3,12 +3,12 @@ use crate::{prelude::*, short_slice_u8};
 use invoker_auth::{Challenge, Solution};
 pub enum Income {
     Challenge(Challenge),
-    AuthVerdict(bool),
+    Verdict(bool),
 }
 impl std::fmt::Debug for Income {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AuthVerdict(verdict) => {
+            Self::Verdict(verdict) => {
                 write!(f, "{}", if *verdict { "Approved" } else { "Denied" })
             }
             Self::Challenge(challenge) => f
@@ -21,8 +21,8 @@ impl std::fmt::Debug for Income {
 impl super::Income for Income {
     fn from_raw(msg: MappedRawMessage) -> Result<Self> {
         Ok(match msg.ty() {
-            "AUTH_VERDICT" => Self::AuthVerdict(msg.field_eq("VERDICT", "APPROVED")),
-            "AUTH_CHALLENGE" => {
+            "VERDICT" => Self::Verdict(msg.field_eq("VERDICT", "APPROVED")),
+            "CHALLENGE" => {
                 let Some(data) = msg.data() else {
                     bail!("data not found");
                 };
@@ -54,7 +54,7 @@ impl super::Outgo for Outgo {
     fn into_raw(self) -> RawMessage {
         match self {
             Outgo::ChallengeSolution(data) => {
-                let mut body = RawMessage::new("AUTH");
+                let mut body = RawMessage::new("PROOF");
                 body.set_data(Box::from(&*data));
                 body
             }

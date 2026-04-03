@@ -1,5 +1,3 @@
-use super::Lang;
-
 pub mod test {
     use std::{fmt::Debug, sync::Arc};
 
@@ -94,8 +92,6 @@ pub mod test {
 pub mod submission {
     use serde::Deserialize;
 
-    use super::Lang;
-
     #[derive(Debug, Deserialize, Clone)]
     #[serde(rename_all = "snake_case")]
     pub enum Type {
@@ -128,7 +124,6 @@ pub mod submission {
         #[serde(rename = "type")]
         pub ty: Type,
 
-        pub lang: Lang,
         pub limits: Limits,
         pub groups: Box<[Group]>,
     }

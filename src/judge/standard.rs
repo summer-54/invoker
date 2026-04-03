@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _, task::JoinHandle};
@@ -6,7 +6,6 @@ use tokio::{fs::File, io::AsyncReadExt as _, task::JoinHandle};
 use super::{
     Lang, SOLUTION_EXT, SOLUTION_NAME,
     api::{submission, test},
-    path_from,
 };
 use crate::{
     LogState, Result,
@@ -14,20 +13,20 @@ use crate::{
 };
 
 const CHECKER_NAME: &str = "checker";
-const CHECKER_EXT: Option<&str> = Some("out");
+const CHECKER_EXT: &str = "out";
 
 const INPUT_DIR: &str = "input";
-const INPUT_EXT: Option<&str> = Some("txt");
+const INPUT_EXT: &str = "txt";
 
 const CORRECT_DIR: &str = "correct";
-const CORRECT_EXT: Option<&str> = Some("txt");
+const CORRECT_EXT: &str = "txt";
 
 pub struct Enviroment {
     sandbox: Arc<sandbox::Sandbox>,
     limits: submission::Limits,
     lang: Lang,
 
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
     test_id: usize,
     log_state: Arc<LogState>,
 }
@@ -36,7 +35,7 @@ pub async fn prepare(
     sandboxes: Arc<sandbox::Service>,
     lang: Lang,
     limits: submission::Limits,
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
 
     test_id: usize,
     log_state: Arc<LogState>,
@@ -60,19 +59,23 @@ impl super::Enviroment for Enviroment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
         let log_state = self.log_state.push("task type", "STANDARD");
         log::trace!("({log_state}) testing STARTED");
-        let src_input_path = super::path_from(
-            &format!("{}/{INPUT_DIR}", self.work_dir),
-            &format!("{}", self.test_id + 1),
-            INPUT_EXT,
-        );
-        let src_correct_path = path_from(
-            &format!("{}/{CORRECT_DIR}", self.work_dir),
-            &format!("{}", self.test_id + 1),
-            CORRECT_EXT,
-        );
-        let src_checker_path = path_from(&self.work_dir, CHECKER_NAME, CHECKER_EXT);
+        let src_input_path = self
+            .work_dir
+            .join(INPUT_DIR)
+            .join(&format!("{}", self.test_id + 1))
+            .with_extension(INPUT_EXT);
+        let src_correct_path = self
+            .work_dir
+            .join(CORRECT_DIR)
+            .join(&format!("{}", self.test_id + 1))
+            .with_extension(CORRECT_EXT);
 
-        let src_solution_path = path_from(&self.work_dir, SOLUTION_NAME, SOLUTION_EXT);
+        let src_checker_path = self.work_dir.join(CHECKER_NAME).with_extension(CHECKER_EXT);
+
+        let src_solution_path = self
+            .work_dir
+            .join(SOLUTION_NAME)
+            .with_extension(SOLUTION_EXT);
 
         const TARGET_INPUT_PATH: &str = "in.txt";
         const TARGET_CORRECT_PATH: &str = "correct.txt";
@@ -91,7 +94,7 @@ impl super::Enviroment for Enviroment {
                     (File::open(&*src_solution_path).await?, TARGET_SOLUTION_PATH),
                 ]
                 .into_iter()
-                .map(|(from, to)| (from, Box::from(to)))
+                .map(|(from, to)| (from, Path::new(to)))
                 .collect(),
             )
             .await?;

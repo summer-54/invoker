@@ -1,12 +1,17 @@
 pub mod api;
 // mod double_run;
+mod consts;
 mod interactive;
 mod standard;
 
 use crate::prelude::*;
 
 use async_trait::async_trait;
+use consts::*;
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, sync::Arc,
+};
 use tar_archive_rs as archive;
 use tokio::{
     fs::{File, create_dir, create_dir_all, remove_dir_all},
@@ -14,8 +19,6 @@ use tokio::{
     sync::{Mutex, Semaphore, mpsc::UnboundedSender},
     task::JoinHandle,
 };
-
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
 
 use crate::{
     LogState, Result,
@@ -37,12 +40,25 @@ pub enum Lang {
     Python,
 }
 
+impl TryFrom<&str> for Lang {
+    type Error = Error;
+    fn try_from(s: &str) -> Result<Self> {
+        Ok(match &*s.to_lowercase() {
+            "g++" => Lang::Gpp,
+            "python3" => Lang::Python,
+            _ => {
+                bail!("unknown language: {s}")
+            }
+        })
+    }
+}
+
 impl Lang {
     pub fn command_to_run(&self, name: &str) -> Command {
         match self {
             Self::Gpp => Command::new(format!("./{name}")),
             Self::Python => {
-                let mut cmd = Command::new("/usr/bin/python3");
+                let mut cmd = Command::new(PYTHON3_BIN_PATH);
                 cmd.arg(name);
                 cmd
             }
@@ -108,23 +124,11 @@ impl Config {
 
 pub struct Service {
     config: Config,
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
 
     semaphore: Semaphore,
     sandboxes: Arc<sandbox::Service>,
     handler: Mutex<Option<JoinHandle<()>>>,
-}
-
-const CHANNEL_DIR: &str = "/.invoker";
-const SOLUTION_NAME: &str = "solution";
-const SOLUTION_EXT: Option<&str> = Some("out");
-
-pub fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
-    format!(
-        "{dir}/{name}{}",
-        ext.map(|s| [".", s].concat()).unwrap_or("".to_string())
-    )
-    .into_boxed_str()
 }
 
 #[async_trait]
@@ -134,19 +138,19 @@ pub trait Enviroment: Send {
 
 impl Service {
     pub async fn new(
-        config_dir: &str,
+        config_dir: impl AsRef<Path>,
         sandboxes: Arc<sandbox::Service>,
-        work_dir: Box<str>,
+        work_dir: impl AsRef<Path>,
     ) -> Service {
-        if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
-            create_dir(&*work_dir).await.unwrap();
+        if !tokio::fs::try_exists(&work_dir).await.unwrap() {
+            create_dir(&work_dir).await.unwrap();
         }
-        if !tokio::fs::try_exists(CHANNEL_DIR).await.unwrap() {
-            create_dir_all(CHANNEL_DIR).await.unwrap();
+        if !tokio::fs::try_exists(consts::CHANNEL_DIR).await.unwrap() {
+            create_dir_all(consts::CHANNEL_DIR).await.unwrap();
         }
         Service {
             config: Config::load(config_dir).await,
-            work_dir,
+            work_dir: work_dir.as_ref().into(),
             sandboxes,
             handler: Mutex::new(None),
             semaphore: Semaphore::new(1),
@@ -174,20 +178,21 @@ impl Service {
 
         sandbox
             .write_into_box(
-                &mut File::open(format!("{}/solution", &*self.work_dir)).await?,
-                "solution.cpp",
+                &mut File::open(&*self.work_dir.join(SOLUTION_NAME)).await?,
+                "solution",
             )
             .await?;
 
-        let compile_errors_path = "compile_errors";
+        const COMPILE_ERRORS_PATH: &str = "compile_errors";
+
         let mut compilation_command =
             self.config
-                .compilation_command(lang, "solution.cpp", "solution.out")?;
+                .compilation_command(lang, SOLUTION_NAME, SOLUTION_EXEC_NAME)?;
         compilation_command
             .count_files(MaybeLimited::Unlimited)
             .count_process(MaybeLimited::Unlimited)
             .use_env()
-            .stderr(compile_errors_path);
+            .stderr(COMPILE_ERRORS_PATH);
 
         let compile_result = sandbox.run(&compilation_command).await?;
 
@@ -196,14 +201,14 @@ impl Service {
         match compile_result.status {
             sandbox::RunStatus::Tl | sandbox::RunStatus::Ml | sandbox::RunStatus::Sg(_) => {
                 let mut message = String::new();
-                if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
+                if let Ok(mut r) = sandbox.read_from_box(COMPILE_ERRORS_PATH).await {
                     r.read_to_string(&mut message).await?;
                 }
                 return Ok(Some(submission::Result::Te(message.into_boxed_str())));
             }
             sandbox::RunStatus::Re(_) => {
                 let mut message = String::new();
-                if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
+                if let Ok(mut r) = sandbox.read_from_box(COMPILE_ERRORS_PATH).await {
                     r.read_to_string(&mut message).await?;
                 }
 
@@ -212,8 +217,12 @@ impl Service {
             _ => (),
         };
 
-        let mut file = tokio::fs::File::create(format!("{}/solution.out", self.work_dir)).await?;
-        tokio::io::copy(&mut sandbox.read_from_box("solution.out").await?, &mut file).await?;
+        let mut file = tokio::fs::File::create(self.work_dir.join(SOLUTION_EXEC_NAME)).await?;
+        tokio::io::copy(
+            &mut sandbox.read_from_box(SOLUTION_EXEC_NAME).await?,
+            &mut file,
+        )
+        .await?;
         file.set_permissions(Permissions::from_mode(0o777)).await?;
         Ok(None)
     }
@@ -221,22 +230,25 @@ impl Service {
     pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
         self: Arc<Self>,
         mut package: archive::Archive<R>,
+        lang: Lang,
+        solution: Box<[u8]>,
         sender: UnboundedSender<(usize, test::Result)>,
     ) -> Result<submission::Result> {
         let permit = self.semaphore.try_acquire()?;
         log::info!("testing started");
+
         package.unpack(&*self.work_dir).await?;
+        tokio::fs::write(Path::new(&*self.work_dir).join(SOLUTION_NAME), solution).await?;
 
         let mut text = String::new();
-        File::open(&format!("{}/config.yaml", &self.work_dir))
+        File::open(self.work_dir.join(PACKAGE_CONFIG_NAME))
             .await?
             .read_to_string(&mut text)
             .await?;
 
-        log::trace!("config.yaml:\n{text}");
+        log::trace!("{PACKAGE_CONFIG_NAME}:\n{text}");
 
         let task: Arc<Task> = Arc::new(serde_yml::from_str(text.as_str())?);
-        let lang = task.lang;
 
         if let Some(verdict) = self
             .compile_solution(lang)
@@ -269,7 +281,7 @@ impl Service {
 
                 let task = Arc::clone(&task);
                 let enviroment = self
-                    .prepare(task, test_number, log_state)
+                    .prepare(task, lang, test_number, log_state)
                     .await
                     .context("enviroment preparing")?;
 
@@ -328,6 +340,7 @@ impl Service {
     async fn prepare(
         &self,
         task: Arc<Task>,
+        lang: Lang,
         test_id: usize,
         log_state: Arc<LogState>,
     ) -> Result<Box<dyn Enviroment>> {
@@ -335,7 +348,7 @@ impl Service {
             submission::Type::Standard => Box::from(
                 standard::prepare(
                     Arc::clone(&self.sandboxes),
-                    task.lang,
+                    lang,
                     task.limits,
                     self.work_dir.clone(),
                     test_id,
@@ -347,7 +360,7 @@ impl Service {
             submission::Type::Interactive => Box::from(
                 interactive::prepare(
                     Arc::clone(&self.sandboxes),
-                    task.lang,
+                    lang,
                     task.limits,
                     self.work_dir.clone(),
                     test_id,

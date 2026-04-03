@@ -7,7 +7,7 @@ use super::{
 
 pub use http::Uri;
 use std::{collections::HashMap, sync::Arc};
-
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use {
     ratchet_rs::{
         Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
@@ -66,19 +66,20 @@ impl Channel {
 }
 
 impl super::MultiplexChannel for Channel {
-    async fn new_stream<I: Income, O: Outgo>(self: &Arc<Self>, name: &str) -> Stream<I, O> {
+    type Receiver = UnboundedReceiverStream<RawMessage>;
+    async fn new_stream<I: Income, O: Outgo>(self: &Arc<Self>, name: &str) -> Stream<I, O, Self> {
         let (sender, receiver) = unbounded_channel();
         let mut streams = self.streams.lock().await;
         streams.insert(Box::from(name), sender);
         let this = self.clone();
         let name_boxed = Box::<str>::from(name);
         Stream::new(
-            receiver,
-            Box::new(move |msg: O| {
-                let this_clone = this.clone();
+            receiver.into(),
+            this,
+            Box::new(move |msg: O, this: Arc<Self>| {
                 let name_clone = name_boxed.clone();
                 log::info!("sending: [stream: {name_boxed}] {msg:?}");
-                Box::pin(this_clone.send(name_clone, msg.into_raw())) as super::stream::SendResult
+                Box::pin(this.send(name_clone, msg.into_raw())) as super::stream::SendResult
             }),
         )
     }

@@ -91,9 +91,11 @@ Target web-socket client at `ws://$INVOKER_MANAGER_HOST`
 #### Start task
 ```
 master
-TYPE START
+TYPE RUN
+PACKAGE <id>
+LANG C++
 DATA
-<binary data: tar: task_template>
+<binary data: source code>
 ```
 #### Stop task
 ```
@@ -170,21 +172,21 @@ MESSAGE <exit data>
 #### Authenticate challenge
 ```
 auth
-TYPE AUTH_CHALLENGE
+TYPE CHALLENGE
 DATA
 <binary data: challenge>
 ```
 #### Authenticate verdict
 ```
 auth
-TYPE AUTH_VERDICT
+TYPE VERDICT
 VERDICT <verdict: {APPROVED, DENIED}>
 ```
-
 ### Outgoing
 ####  Authenticate
 ```
-TYPE AUTH
+auth
+TYPE PROOF
 DATA
 <bytes>
 ```

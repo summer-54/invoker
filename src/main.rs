@@ -1,5 +1,7 @@
 mod application;
 mod channel;
+mod consts;
+mod file;
 mod judge;
 mod logger;
 mod prelude;
@@ -24,6 +26,7 @@ use crate::{
         stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo},
     },
 };
+use std::path::Path;
 
 #[cfg(not(feature = "mock"))]
 use {crate::server::websocket::Uri, std::str::FromStr};
@@ -40,10 +43,11 @@ use {std::sync::Arc, uuid::Uuid};
 struct Config {
     #[cfg(not(feature = "mock"))]
     pub manager_host: Box<str>,
-    pub config_dir: Box<str>,
-    pub work_dir: Box<str>,
+    pub config_dir: Box<Path>,
+    pub work_dir: Box<Path>,
+    pub cache_dir: Box<Path>,
 
-    pub isolate_exe_path: Box<str>,
+    pub isolate_exe_path: Box<Path>,
     pub cert_name: Box<str>,
     pub cert_path: Box<str>,
 }
@@ -70,11 +74,9 @@ async fn init_communnication(config: Config) -> Result<Arc<websocket::Channel>> 
 }
 
 #[cfg(feature = "mock")]
-async fn init_communnication(
-    _config: Config,
-) -> Result<(Arc<impl income::Receiver>, Arc<impl outgo::Sender>)> {
+async fn init_communnication(_config: Config) -> Result<Arc<impl MultiplexChannel>> {
     log::info!("{} communication initialized", "mock".bold());
-    Ok((Arc::new(server::MockChannel::new())))
+    Ok((Arc::new(server::mock::MockChannel::new())))
 }
 
 #[tokio::main]
@@ -89,11 +91,11 @@ async fn main() -> Result<()> {
     let config = Config::init().await?;
 
     if !tokio::fs::try_exists(&*config.config_dir).await? {
-        log::error!("config directory: '{}' not founded", config.config_dir);
-        bail!("config directory: '{}' not founded", config.config_dir);
+        log::error!("config directory: '{:?}' not founded", config.config_dir);
+        bail!("config directory: '{:?}' not founded", config.config_dir);
     }
 
-    let judger_work_dir = format!("{}/judge", config.work_dir).into_boxed_str();
+    let judger_work_dir = config.work_dir.join("judge");
     let token = Uuid::new_v4();
     println!("\n[{}] invoker token\n", format!("{token}").yellow().bold());
 
@@ -102,15 +104,23 @@ async fn main() -> Result<()> {
     let isolate_service =
         sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
+    let inner_provider =
+        file::stream_provider::StreamProvider::new(channel.clone(), consts::streams_names::LOAD)
+            .await;
+    let file_provider = file::CachingProvider::init(config.cache_dir, inner_provider).await?;
+
     let app = App {
         master_stream: channel
-            .new_stream::<MasterIncome, MasterOutgo>("master")
+            .new_stream::<MasterIncome, MasterOutgo>(consts::streams_names::MASTER)
             .await,
-        auth_stream: channel.new_stream::<AuthIncome, AuthOutgo>("master").await,
+        auth_stream: channel
+            .new_stream::<AuthIncome, AuthOutgo>(consts::streams_names::AUTH)
+            .await,
         judge_service: Arc::new(
             judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
         ),
         cert: Arc::new(cert),
+        file_provider,
     };
 
     app.master_stream
@@ -124,14 +134,14 @@ async fn main() -> Result<()> {
 
     let app = Arc::new(app);
     let result = app.run();
-    for name in std::env::args().skip(1) {
-        app.start_judgment(
-            tokio::fs::read(name.as_str())
-                .await
-                .context("reading file '{name}'")?
-                .into_boxed_slice(),
-        );
-    }
+    // for name in std::env::args().skip(1) {
+    //     app.start_judgment(
+    //         tokio::fs::read(name.as_str())
+    //             .await
+    //             .context("reading file '{name}'")?
+    //             .into_boxed_slice(),
+    //     );
+    // }
 
     let result = result.await;
 

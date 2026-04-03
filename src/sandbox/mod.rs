@@ -46,10 +46,10 @@ pub struct IsolateConfig {
     extra_time_default_limit: f64,
     real_time_default_limit: MaybeLimited<f64>, // Real time limit (in seconds)
 
-    box_root: Box<str>,
-    lock_root: Box<str>,
+    box_root: Box<Path>,
+    lock_root: Box<Path>,
 
-    cg_root: Box<str>,
+    cg_root: Box<Path>,
     first_uid: usize,
     first_gid: usize,
 
@@ -62,9 +62,9 @@ impl Default for IsolateConfig {
     fn default() -> Self {
         Self {
             sandboxes_count: 1000,
-            box_root: "/.invoker/isolate".to_string().into_boxed_str(),
-            lock_root: "/run/isolate/locks".to_string().into_boxed_str(),
-            cg_root: "/run/isolate/cgroup".to_string().into_boxed_str(),
+            box_root: Box::from(Path::new("/.invoker/isolate")),
+            lock_root: Box::from(Path::new("/run/isolate/locks")),
+            cg_root: Box::from(Path::new("/run/isolate/cgroup")),
             first_uid: 60000,
             first_gid: 60000,
             restricted_init: false,
@@ -93,9 +93,9 @@ impl IsolateConfig {
             .write_all(
                 format!(
                     "box_root={}\nlock_root={}\ncg_root={}\nfirst_uid={}\nfirst_gid={}\nnum_boxes={}\nrestricted_init={}\n",
-                    self.box_root,
-                    self.lock_root,
-                    self.cg_root,
+                    self.box_root.to_str().unwrap(),
+                    self.lock_root.to_str().unwrap(),
+                    self.cg_root.to_str().unwrap(),
                     self.first_uid,
                     self.first_gid,
                     self.sandboxes_count,
@@ -114,21 +114,27 @@ impl IsolateConfig {
 
 pub struct Service {
     config: IsolateConfig,
-    path: Box<str>,
+    path: Box<Path>,
     boxes_pull: ResourcePool<usize>,
 }
 
 impl Service {
-    pub async fn new(config_dir: &str, path: Box<str>) -> Result<Arc<Service>> {
-        if !TokioCommand::new(&*path)
+    pub async fn new(config_dir: impl AsRef<Path>, path: impl AsRef<Path>) -> Result<Arc<Service>> {
+        if !TokioCommand::new(path.as_ref().display().to_string())
             .arg("--version")
             .stdout(Stdio::null())
             .status()
             .await?
             .success()
         {
-            log::error!("isolate doesn't exist by path '{path}'");
-            return Err(anyhow!("isolate doesn't exist by path '{path}'"));
+            log::error!(
+                "isolate doesn't exist by path '{}'",
+                path.as_ref().display()
+            );
+            return Err(anyhow!(
+                "isolate doesn't exist by path '{}'",
+                path.as_ref().display()
+            ));
         }
 
         let config = IsolateConfig::load(config_dir).await;
@@ -137,7 +143,7 @@ impl Service {
         Ok(Arc::new(Service {
             boxes_pull: (0..config.sandboxes_count).collect(),
             config,
-            path,
+            path: path.as_ref().into(),
         }))
     }
 
@@ -235,46 +241,54 @@ impl Sandbox {
     pub fn id(&self) -> usize {
         self.id
     }
-    fn inner_dir(&self) -> Box<str> {
-        format!("{}/{}/box", self.service.config.box_root, self.id).into_boxed_str()
+    fn inner_dir(&self) -> PathBuf {
+        self.service
+            .config
+            .box_root
+            .join(format!("{}", self.id))
+            .join("box")
+            .into()
     }
 
     pub async fn run(&self, target: &Command) -> Result<RunResult> {
         let target = target.clone();
-        let meta_path = format!("{}/meta", self.inner_dir());
+        let meta_path = self.inner_dir().join("meta");
         let mut log_st = LogState::new();
         log_st = log_st.push("box", &*format!("{}", self.id()));
 
         let mut command = TokioCommand::new(&*self.service.path);
         command
             .arg(format!("--box-id={}", self.id))
-            .arg(format!("--meta={meta_path}"))
+            .arg(format!(
+                "--meta={}",
+                meta_path.to_str().ok_or(anyhow!("invalid inner dir"))?
+            ))
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
         if let Some(input_path) = target.stdin {
-            command.arg(format!("--stdin={input_path}"));
+            command.arg(format!("--stdin={}", input_path.display()));
         }
         if let Some(output_path) = target.stdout {
-            if output_path.chars().nth(0).unwrap() != '/' {
-                let path = format!("{}/{}", self.inner_dir(), output_path);
+            if output_path.is_relative() {
+                let path = self.inner_dir().join(&output_path);
                 tokio::fs::File::create(&path)
                     .await
                     .context("creating file")?;
             }
-            log::trace!("({log_st}) file: {output_path} created");
-            command.arg(format!("--stdout={output_path}"));
+            log::trace!("({log_st}) file: {} created", output_path.display());
+            command.arg(format!("--stdout={}", output_path.display()));
         }
         if let Some(error_path) = target.stderr {
-            if error_path.chars().nth(0).unwrap() != '/' {
-                let path = format!("{}/{}", self.inner_dir(), error_path);
+            if error_path.is_relative() {
+                let path = self.inner_dir().join(&error_path);
                 tokio::fs::File::create(&path)
                     .await
                     .context("creating file")?;
             }
 
-            log::trace!("({log_st}) file: {error_path} created");
-            command.arg(format!("--stderr={error_path}"));
+            log::trace!("({log_st}) file: {} created", error_path.display());
+            command.arg(format!("--stderr={}", error_path.display()));
         }
 
         for dir in target.open_dirs {
@@ -377,13 +391,13 @@ impl Sandbox {
     pub async fn write_into_box<R: AsyncRead + Unpin + ?Sized>(
         &self,
         from: &mut R,
-        to: &str,
+        to: impl AsRef<Path>,
     ) -> Result<()> {
         let mut log_st = LogState::new();
         log_st = log_st.push("box", &*format!("{}", self.id()));
 
         _ = tokio::io::copy(from, &mut {
-            let file = File::create(format!("{}/{to}", self.inner_dir()))
+            let file = File::create(self.inner_dir().join(&to))
                 .await
                 .context("creating file")?;
             file.set_permissions(Permissions::from_mode(0o777))
@@ -394,21 +408,21 @@ impl Sandbox {
         .await?;
         log::trace!(
             "({log_st}) copied '{}' to '{}'",
-            to.bold(),
-            format!("{}/{to}", self.inner_dir()).bold()
+            to.as_ref().display().to_string().bold(),
+            self.inner_dir().join(to).display().to_string().bold(),
         );
         Ok(())
     }
 
     pub async fn write_group_into_box<R: AsyncRead + Unpin + Send + 'static>(
         self: Arc<Self>,
-        group: Box<[(R, Box<str>)]>,
+        group: Box<[(R, impl AsRef<Path> + 'static + Send)]>,
     ) -> Result<()> {
         let mut handlers = Vec::new();
         for (mut from, to) in group {
             let this = Arc::clone(&self);
             handlers.push(tokio::spawn(async move {
-                this.write_into_box(&mut from, &*to).await
+                this.write_into_box(&mut from, to).await
             }));
         }
 
@@ -418,15 +432,15 @@ impl Sandbox {
         Ok(())
     }
 
-    pub async fn read_from_box(&self, from: &str) -> Result<File> {
+    pub async fn read_from_box(&self, from: impl AsRef<Path>) -> Result<File> {
         let mut log_st = LogState::new();
         log_st = log_st.push("box", &*format!("{}", self.id()));
 
         log::trace!(
             "({log_st}) open '{}'",
-            format!("{}/{from}", self.inner_dir()).bold()
+            self.inner_dir().join(&from).display().to_string().bold()
         );
-        Ok(tokio::fs::File::open(format!("{}/{from}", self.inner_dir())).await?)
+        Ok(tokio::fs::File::open(self.inner_dir().join(from)).await?)
     }
 }
 
