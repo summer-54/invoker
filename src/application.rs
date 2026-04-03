@@ -1,4 +1,4 @@
-use crate::{prelude::*, server::MultiplexChannel};
+use crate::prelude::*;
 
 use std::sync::Arc;
 
@@ -15,17 +15,15 @@ use crate::{
 };
 use tar_archive_rs::{self as archive, ArchiveItem};
 
-pub struct App<C: MultiplexChannel, P: file::Provider> {
-    pub master_stream: MasterStream<C>,
-    pub auth_stream: AuthStream<C>,
+pub struct App<P: file::Provider> {
+    pub master_stream: MasterStream,
+    pub auth_stream: AuthStream,
     pub judge_service: Arc<judge::Service>,
     pub cert: Arc<Cert>,
     pub file_provider: P,
 }
 
-impl<C: MultiplexChannel + Sized + Send + Sync + 'static, P: file::Provider + Sync + Send + 'static>
-    App<C, P>
-{
+impl<P: file::Provider + Sync + Send + 'static> App<P> {
     pub fn start_judgment(
         self: &Arc<Self>,
         lang: Lang,

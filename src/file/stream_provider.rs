@@ -2,27 +2,23 @@ use crate::prelude::*;
 
 use super::Id;
 
-use crate::server::{
-    MultiplexChannel,
-    stream::{LoadIncome, LoadOutgo, LoadStream},
-};
+use crate::server::stream::{LoadIncome, LoadOutgo, LoadStream};
 
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub struct StreamProvider<C: MultiplexChannel> {
-    stream: Mutex<LoadStream<C>>,
+pub struct StreamProvider {
+    stream: Mutex<LoadStream>,
 }
 
-impl<C: MultiplexChannel> StreamProvider<C> {
-    pub async fn new(channel: Arc<C>, stream_name: &str) -> Self {
+impl StreamProvider {
+    pub fn new(stream: LoadStream) -> Self {
         Self {
-            stream: Mutex::new(channel.new_stream(stream_name).await),
+            stream: Mutex::new(stream),
         }
     }
 }
 
-impl<C: MultiplexChannel + Sync + Send> super::Provider for StreamProvider<C> {
+impl super::Provider for StreamProvider {
     async fn get(&self, id: Id) -> Result<Box<[u8]>> {
         let stream = self.stream.lock().await;
         stream.send(LoadOutgo::Load { package_id: id }).await?;

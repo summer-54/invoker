@@ -21,10 +21,7 @@ fn short_slice_u8(data: &[u8]) -> &[u8] {
 use crate::server::websocket;
 use crate::{
     application::App,
-    server::{
-        MultiplexChannel,
-        stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo},
-    },
+    server::stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo},
 };
 use std::path::Path;
 
@@ -104,9 +101,9 @@ async fn main() -> Result<()> {
     let isolate_service =
         sandbox::Service::new(&config.config_dir, config.isolate_exe_path).await?;
 
-    let inner_provider =
-        file::stream_provider::StreamProvider::new(channel.clone(), consts::streams_names::LOAD)
-            .await;
+    let inner_provider = file::stream_provider::StreamProvider::new(
+        channel.new_stream(consts::streams_names::LOAD).await,
+    );
     let file_provider = file::CachingProvider::init(config.cache_dir, inner_provider).await?;
 
     let app = App {

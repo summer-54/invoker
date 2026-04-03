@@ -14,7 +14,6 @@ env_logger = "*"
 colored = "*"
 
 tokio = "*"
-tokio-stream = "*"
 
 ratchet_rs = { version = "*", features = ["deflate", "split"] }
 bytes = "*"

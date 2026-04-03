@@ -880,7 +880,6 @@ dependencies = [
  "serde_yml",
  "tar_archive_rs",
  "tokio",
- "tokio-stream",
  "uuid",
 ]
 
