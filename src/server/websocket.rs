@@ -2,7 +2,7 @@ use crate::prelude::*;
 
 use super::{
     RawMessage,
-    stream::{Income, Outgo, Stream},
+    stream::{self, Income, Outgo},
 };
 
 pub use http::Uri;
@@ -17,11 +17,36 @@ use {
         net::{TcpStream, ToSocketAddrs},
         sync::{
             Mutex,
-            mpsc::{UnboundedSender, unbounded_channel},
+            mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
         },
     },
 };
 const MAX_MESSAGE_SIZE: usize = 1 << 31;
+
+pub struct Stream {
+    name: Box<str>,
+    channel: Arc<Channel>,
+    receiver: Mutex<UnboundedReceiver<RawMessage>>,
+}
+
+impl<I: Income, O: Outgo + Send> stream::Stream<I, O> for Stream {
+    async fn recv(&self) -> Result<I> {
+        I::from_raw(
+            self.receiver
+                .lock()
+                .await
+                .recv()
+                .await
+                .ok_or(anyhow!("receiver was closed"))?
+                .into_mapped(),
+        )
+    }
+    async fn send(&self, msg: O) -> Result<()> {
+        Arc::clone(&self.channel)
+            .send(self.name.clone(), msg.into_raw())
+            .await
+    }
+}
 
 pub struct Channel {
     streams: Mutex<HashMap<Box<str>, UnboundedSender<RawMessage>>>,
@@ -65,37 +90,16 @@ impl Channel {
 }
 
 impl Channel {
-    pub async fn new_stream<I: Income + 'static, O: Outgo>(
-        self: &Arc<Self>,
-        name: &str,
-    ) -> Stream<I, O> {
+    pub async fn new_stream(self: &Arc<Self>, name: &str) -> Stream {
         let (sender, receiver) = unbounded_channel();
-        let receiver = Arc::new(Mutex::new(receiver));
+        let receiver = Mutex::new(receiver);
         let mut streams = self.streams.lock().await;
         streams.insert(Box::from(name), sender);
-        let this = self.clone();
-        let name_boxed = Box::<str>::from(name);
-        Stream::new(
-            Box::new(move |msg: O| {
-                let name_clone = name_boxed.clone();
-                log::info!("sending: [stream: {name_boxed}] {msg:?}");
-                Box::pin(this.clone().send(name_clone, msg.into_raw()))
-                    as super::stream::SendClosureResult
-            }),
-            Box::new(move || {
-                let receiver_clone = receiver.clone();
-                Box::pin(async move {
-                    receiver_clone
-                        .clone()
-                        .lock()
-                        .await
-                        .recv()
-                        .await
-                        .map(|msg| I::from_raw(msg.into_mapped()))
-                        .ok_or(anyhow!("websocket stream was closed"))?
-                }) as super::stream::ReceiverClosureResult<I>
-            }),
-        )
+        Stream {
+            name: Box::from(name),
+            receiver,
+            channel: Arc::clone(&self),
+        }
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {

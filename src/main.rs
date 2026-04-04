@@ -21,7 +21,7 @@ fn short_slice_u8(data: &[u8]) -> &[u8] {
 use crate::server::websocket;
 use crate::{
     application::App,
-    server::stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo},
+    server::stream::{MasterIncome, MasterOutgo, Stream},
 };
 use std::path::Path;
 
@@ -107,12 +107,8 @@ async fn main() -> Result<()> {
     let file_provider = file::CachingProvider::init(config.cache_dir, inner_provider).await?;
 
     let app = App {
-        master_stream: channel
-            .new_stream::<MasterIncome, MasterOutgo>(consts::streams_names::MASTER)
-            .await,
-        auth_stream: channel
-            .new_stream::<AuthIncome, AuthOutgo>(consts::streams_names::AUTH)
-            .await,
+        master_stream: channel.new_stream(consts::streams_names::MASTER).await,
+        auth_stream: channel.new_stream(consts::streams_names::AUTH).await,
         judge_service: Arc::new(
             judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
         ),
@@ -120,12 +116,14 @@ async fn main() -> Result<()> {
         file_provider,
     };
 
-    app.master_stream
-        .send(MasterOutgo::Token {
+    Stream::<MasterIncome, MasterOutgo>::send(
+        &app.master_stream,
+        MasterOutgo::Token {
             token,
             name: config.cert_name,
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     tokio::spawn(channel.run());
 
@@ -144,21 +142,25 @@ async fn main() -> Result<()> {
 
     match result {
         Ok(_) => {
-            app.master_stream
-                .send(MasterOutgo::Exited {
+            Stream::<MasterIncome, MasterOutgo>::send(
+                &app.master_stream,
+                MasterOutgo::Exited {
                     code: 0,
                     data: Box::from(""),
-                })
-                .await?
+                },
+            )
+            .await?
         }
         Err(e) => {
             log::error!("error: '{e:?}'");
-            app.master_stream
-                .send(MasterOutgo::Exited {
+            Stream::<MasterIncome, MasterOutgo>::send(
+                &app.master_stream,
+                MasterOutgo::Exited {
                     code: 1,
                     data: format!("{e:?}").into_boxed_str(),
-                })
-                .await?
+                },
+            )
+            .await?
         }
     }
     Ok(())

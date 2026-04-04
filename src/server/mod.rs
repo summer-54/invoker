@@ -59,11 +59,7 @@ impl TryFrom<&[u8]> for RawMessage {
             bail!("cannot parse raw msg, field 'TYPE' not found")
         };
 
-        Ok(Self {
-            ty,
-            fields: fields,
-            data,
-        })
+        Ok(Self { ty, fields, data })
     }
 }
 

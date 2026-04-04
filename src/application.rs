@@ -10,20 +10,29 @@ use crate::{
     judge::{self, Lang},
     server::{
         self,
-        stream::{AuthStream, MasterStream, master::FullVerdict},
+        stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream, master::FullVerdict},
     },
 };
 use tar_archive_rs::{self as archive, ArchiveItem};
 
-pub struct App<P: file::Provider> {
-    pub master_stream: MasterStream,
-    pub auth_stream: AuthStream,
+pub struct App<
+    P: file::Provider,
+    AS: Stream<AuthIncome, AuthOutgo>,
+    MS: Stream<MasterIncome, MasterOutgo>,
+> {
+    pub auth_stream: AS,
+    pub master_stream: MS,
     pub judge_service: Arc<judge::Service>,
     pub cert: Arc<Cert>,
     pub file_provider: P,
 }
 
-impl<P: file::Provider + Sync + Send + 'static> App<P> {
+impl<
+    P: file::Provider + Sync + Send + 'static,
+    AS: Stream<AuthIncome, AuthOutgo> + Send + Sync + 'static,
+    MS: Stream<MasterIncome, MasterOutgo> + Send + Sync + 'static,
+> App<P, AS, MS>
+{
     pub fn start_judgment(
         self: &Arc<Self>,
         lang: Lang,
