@@ -122,8 +122,8 @@ async fn init_mock_communication(
         sender,
         Communication {
             auth_stream: AuthStream,
-            master_stream: master_stream,
-            load_stream: load_stream,
+            master_stream,
+            load_stream,
         },
     )
 }
