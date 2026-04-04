@@ -1,6 +1,10 @@
-use super::{MappedRawMessage, RawMessage};
-use crate::{prelude::*, short_slice_u8};
 use invoker_auth::{Challenge, Solution};
+
+use crate::{prelude::*, short_slice_u8};
+
+use super::{MappedRawMessage, RawMessage};
+
+#[allow(dead_code)]
 pub enum Income {
     Challenge(Challenge),
     Verdict(bool),
@@ -13,7 +17,7 @@ impl std::fmt::Debug for Income {
             }
             Self::Challenge(challenge) => f
                 .debug_struct("Challenge")
-                .field("data", &Box::<[u8]>::from(short_slice_u8(&*challenge)))
+                .field("data", &Box::<[u8]>::from(short_slice_u8(challenge)))
                 .finish(),
         }
     }
@@ -26,7 +30,7 @@ impl super::Income for Income {
                 let Some(data) = msg.data() else {
                     bail!("data not found");
                 };
-                Self::Challenge(Challenge::from(&*data))
+                Self::Challenge(Challenge::from(data))
             }
             command => {
                 bail!("incomming websocket message: incorrect command: {command}");

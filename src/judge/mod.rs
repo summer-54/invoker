@@ -7,11 +7,9 @@ mod standard;
 use crate::prelude::*;
 
 use async_trait::async_trait;
+use configo::Config as _;
 use consts::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, sync::Arc,
-};
 use tar_archive_rs as archive;
 use tokio::{
     fs::{File, create_dir, create_dir_all, remove_dir_all},
@@ -20,11 +18,14 @@ use tokio::{
     task::JoinHandle,
 };
 
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, sync::Arc,
+};
+
 use crate::{
     LogState, Result,
     sandbox::{self, Command, MaybeLimited},
 };
-use configo::Config as _;
 
 use api::{
     submission::{self, Task},
@@ -43,13 +44,11 @@ pub enum Lang {
 impl TryFrom<&str> for Lang {
     type Error = Error;
     fn try_from(s: &str) -> Result<Self> {
-        Ok(match &*s.to_lowercase() {
-            "g++" => Lang::Gpp,
-            "python3" => Lang::Python,
-            _ => {
-                bail!("unknown language: {s}")
-            }
-        })
+        match &*s.to_lowercase() {
+            "g++" => Ok(Lang::Gpp),
+            "python3" => Ok(Lang::Python),
+            _ => bail!("unknown language: {}", s),
+        }
     }
 }
 
@@ -78,23 +77,22 @@ impl Default for Config {
                 (
                     Lang::Gpp,
                     vec![
-                        "/usr/bin/g++",
+                        GPP_BIN_PATH,
                         "$SOURCE",
                         "-o",
                         "$OUTPUT",
                         "-O2",
                         "-Wall",
                         "-lm",
-                    ]
-                    .into(),
+                    ],
                 ),
                 (
                     Lang::Python,
-                    vec!["/usr/bin/cp", "--update=none", "$SOURCE", "$OUTPUT"],
+                    vec![COPY_BIN_PATH, "--update=none", "$SOURCE", "$OUTPUT"],
                 ),
             ]
             .into_iter()
-            .map(|(k, v)| (k, v.into_iter().map(|s| s.into()).collect()).into())
+            .map(|(k, v)| (k, v.into_iter().map(|s| s.into()).collect()))
             .collect(),
         }
     }
@@ -174,7 +172,7 @@ impl Service {
             .context("sandbox initializing")?;
 
         let mut log_state = LogState::new();
-        log_state = log_state.push("box", &*format!("{}", sandbox.id()));
+        log_state = log_state.push("box", &format!("{}", sandbox.id()));
 
         sandbox
             .write_into_box(
@@ -265,7 +263,7 @@ impl Service {
         for group in task.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
                 let mut log_state = LogState::new();
-                log_state = log_state.push("test", &*format!("{test_number}"));
+                log_state = log_state.push("test", &format!("{test_number}"));
                 log::trace!("({log_state}) looking on test");
 
                 if blocked_groups.lock().await[group.id].is_some() {
@@ -312,7 +310,6 @@ impl Service {
         let blocked_groups = blocked_groups.lock().await;
 
         let groups_score: Box<[usize]> = (0..task.groups.len())
-            .into_iter()
             .map(|i| {
                 if blocked_groups[i].is_none() {
                     task.groups[i].cost

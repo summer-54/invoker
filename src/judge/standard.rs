@@ -1,15 +1,16 @@
-use std::{path::Path, sync::Arc};
-
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _, task::JoinHandle};
+
+use std::{path::Path, sync::Arc};
+
+use crate::{
+    LogState, Result,
+    sandbox::{self, Command, MaybeLimited::*, RunStatus},
+};
 
 use super::{
     Lang, SOLUTION_EXT, SOLUTION_NAME,
     api::{submission, test},
-};
-use crate::{
-    LogState, Result,
-    sandbox::{self, Command, MaybeLimited::*, RunStatus},
 };
 
 const CHECKER_NAME: &str = "checker";
@@ -42,7 +43,7 @@ pub async fn prepare(
 ) -> Result<Enviroment> {
     let sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
-    let log_state = log_state.push("box_id", &*format!("{}", sandbox.id()));
+    let log_state = log_state.push("box_id", &format!("{}", sandbox.id()));
 
     Ok(Enviroment {
         sandbox,
@@ -62,12 +63,12 @@ impl super::Enviroment for Enviroment {
         let src_input_path = self
             .work_dir
             .join(INPUT_DIR)
-            .join(&format!("{}", self.test_id + 1))
+            .join(format!("{}", self.test_id + 1))
             .with_extension(INPUT_EXT);
         let src_correct_path = self
             .work_dir
             .join(CORRECT_DIR)
-            .join(&format!("{}", self.test_id + 1))
+            .join(format!("{}", self.test_id + 1))
             .with_extension(CORRECT_EXT);
 
         let src_checker_path = self.work_dir.join(CHECKER_NAME).with_extension(CHECKER_EXT);

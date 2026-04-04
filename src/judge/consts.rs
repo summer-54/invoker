@@ -6,4 +6,6 @@ pub const SOLUTION_EXEC_NAME: &str = "solution.out";
 
 pub const PACKAGE_CONFIG_NAME: &str = "config.yaml";
 
+pub const COPY_BIN_PATH: &str = "/usr/bin/cp";
+pub const GPP_BIN_PATH: &str = "/usr/bin/g++";
 pub const PYTHON3_BIN_PATH: &str = "/usr/bin/python3";

@@ -1,4 +1,5 @@
 use crate::prelude::*;
+
 use std::{fmt::Display, sync::Arc};
 
 pub struct LogState(Option<(Arc<LogState>, Box<str>, Box<str>)>);
@@ -8,7 +9,7 @@ impl LogState {
     }
     pub fn push(self: &Arc<Self>, key: &str, value: &str) -> Arc<Self> {
         Arc::new(LogState(Some((
-            Arc::clone(&self),
+            Arc::clone(self),
             Box::from(key),
             Box::from(value),
         ))))

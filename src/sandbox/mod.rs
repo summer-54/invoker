@@ -1,17 +1,11 @@
 pub mod command;
+
 use crate::prelude::*;
+
 pub use command::Command;
 
-use std::{
-    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio, sync::Arc,
-};
-
-use crate::{LogState, Result, anyhow};
-
 use configo::Config as _;
-
 use resource_pool::ResourcePool;
-
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs::File,
@@ -19,18 +13,19 @@ use tokio::{
     process::Command as TokioCommand,
 };
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio, sync::Arc,
+};
+
+use crate::{LogState, Result, anyhow};
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
 pub enum MaybeLimited<T: Copy> {
     Limited(T),
+    #[default]
     Unlimited,
 }
 use MaybeLimited::{Limited, Unlimited};
-
-impl<T: Copy> Default for MaybeLimited<T> {
-    fn default() -> Self {
-        Unlimited
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IsolateConfig {
@@ -150,7 +145,7 @@ impl Service {
     pub async fn initialize_sandbox(self: Arc<Self>) -> Result<Sandbox> {
         let box_id = self.boxes_pull.take().await;
         let mut log_state = LogState::new();
-        log_state = log_state.push("box", &*format!("{box_id}"));
+        log_state = log_state.push("box", &format!("{box_id}"));
         log::debug!("({log_state}) starting");
         let output = TokioCommand::new(&*self.path)
             .arg("--init")
@@ -220,7 +215,7 @@ impl Drop for Sandbox {
         let service = Arc::clone(&self.service);
         let id = self.id;
 
-        let log_state = LogState::new().push("box", &*format!("{id}"));
+        let log_state = LogState::new().push("box", &format!("{id}"));
         tokio::spawn(async move {
             service.boxes_pull.put(id);
             log::trace!("({log_state}) returned to boxes pull");
@@ -247,14 +242,13 @@ impl Sandbox {
             .box_root
             .join(format!("{}", self.id))
             .join("box")
-            .into()
     }
 
     pub async fn run(&self, target: &Command) -> Result<RunResult> {
         let target = target.clone();
         let meta_path = self.inner_dir().join("meta");
         let mut log_st = LogState::new();
-        log_st = log_st.push("box", &*format!("{}", self.id()));
+        log_st = log_st.push("box", &format!("{}", self.id()));
 
         let mut command = TokioCommand::new(&*self.service.path);
         command
@@ -339,11 +333,11 @@ impl Sandbox {
         {
             command.arg(format!("--processes={}", process_limit));
         } else {
-            command.arg(format!("--processes"));
+            command.arg("--processes");
         }
 
         if target.use_env {
-            command.arg(format!("--full-env"));
+            command.arg("--full-env");
         }
 
         command
@@ -394,7 +388,7 @@ impl Sandbox {
         to: impl AsRef<Path>,
     ) -> Result<()> {
         let mut log_st = LogState::new();
-        log_st = log_st.push("box", &*format!("{}", self.id()));
+        log_st = log_st.push("box", &format!("{}", self.id()));
 
         _ = tokio::io::copy(from, &mut {
             let file = File::create(self.inner_dir().join(&to))
@@ -434,7 +428,7 @@ impl Sandbox {
 
     pub async fn read_from_box(&self, from: impl AsRef<Path>) -> Result<File> {
         let mut log_st = LogState::new();
-        log_st = log_st.push("box", &*format!("{}", self.id()));
+        log_st = log_st.push("box", &format!("{}", self.id()));
 
         log::trace!(
             "({log_st}) open '{}'",

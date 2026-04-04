@@ -1,13 +1,14 @@
-#[cfg(feature = "mock")]
-pub mod mock;
 pub mod stream;
 #[cfg(not(feature = "mock"))]
 pub mod websocket;
 
 use crate::prelude::*;
+
 use crate::short_slice_u8;
+
 use std::{collections::HashMap, sync::Arc};
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MappedRawMessage {
     map: HashMap<Arc<str>, usize>,
     msg: RawMessage,
@@ -20,7 +21,7 @@ pub struct RawMessage {
 }
 impl std::fmt::Debug for RawMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = f.debug_struct(&*self.ty);
+        let mut s = f.debug_struct(&self.ty);
         s.field("fields", &self.fields);
         if let Some(data) = &self.data {
             s.field("data", &Box::<[u8]>::from(short_slice_u8(data)));
@@ -36,7 +37,7 @@ impl TryFrom<&[u8]> for RawMessage {
         let mut ty = Option::<Box<str>>::None;
 
         let data = loop {
-            let Some(endl_pos) = buf.iter().position(|&b| b == ('\n' as u8)) else {
+            let Some(endl_pos) = buf.iter().position(|&b| b == b'\n') else {
                 break None;
             };
 
@@ -63,6 +64,7 @@ impl TryFrom<&[u8]> for RawMessage {
     }
 }
 
+#[allow(dead_code)]
 impl RawMessage {
     pub fn new(ty: impl ToString) -> Self {
         Self {
@@ -72,8 +74,9 @@ impl RawMessage {
         }
     }
     pub fn into_bytes(self) -> impl Iterator<Item = u8> {
-        let buf = format!("TYPE {}\n", self.ty).into_bytes().into_iter();
-        let buf = buf
+        format!("TYPE {}\n", self.ty)
+            .into_bytes()
+            .into_iter()
             .chain(
                 self.fields
                     .into_iter()
@@ -82,9 +85,8 @@ impl RawMessage {
             .chain(
                 self.data
                     .into_iter()
-                    .flat_map(|data| "DATA\n".bytes().chain(data.into_iter())),
-            );
-        buf
+                    .flat_map(|data| "DATA\n".bytes().chain(data)),
+            )
     }
 
     pub fn add_field(&mut self, name: &dyn ToString, value: &dyn ToString) -> &mut Self {
@@ -127,6 +129,7 @@ impl TryFrom<&[u8]> for MappedRawMessage {
         Ok(Self::from(RawMessage::try_from(value)?))
     }
 }
+#[allow(dead_code)]
 impl MappedRawMessage {
     pub fn field(&self, name: &str) -> Option<&str> {
         Some(&*self.msg.fields[*self.map.get(name)?].1)

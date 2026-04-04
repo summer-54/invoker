@@ -41,4 +41,5 @@ nix = {version = "*", features = ["user"]}
 async-trait = {version = "*"}
 
 [features]
+default = ["mock"]
 mock = []

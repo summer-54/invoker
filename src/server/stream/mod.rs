@@ -1,8 +1,9 @@
 pub mod auth;
 pub mod load;
 pub mod master;
-use super::{MappedRawMessage, RawMessage};
 use crate::prelude::*;
+
+use super::{MappedRawMessage, RawMessage};
 
 pub type MasterIncome = master::Income;
 pub type MasterOutgo = master::Outgo;
@@ -13,9 +14,11 @@ pub type AuthOutgo = auth::Outgo;
 pub type LoadIncome = load::Income;
 pub type LoadOutgo = load::Outgo;
 
+#[allow(dead_code)]
 pub trait Income: Sized {
     fn from_raw(msg: MappedRawMessage) -> Result<Self>;
 }
+#[allow(dead_code)]
 pub trait Outgo {
     fn into_raw(self) -> RawMessage;
 }

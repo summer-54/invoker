@@ -5,7 +5,9 @@ use crate::{
 };
 
 use super::{MappedRawMessage, RawMessage};
+
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum FullVerdict {
     Ok {
         score: usize,
@@ -14,6 +16,7 @@ pub enum FullVerdict {
     Ce(Box<str>),
     Te(Box<str>),
 }
+#[allow(dead_code)]
 pub enum Income {
     Start {
         package_id: crate::file::Id,
@@ -35,7 +38,7 @@ impl std::fmt::Debug for Income {
                 .debug_struct("Start")
                 .field("package_id", package_id)
                 .field("lang", lang)
-                .field("data", &Box::<[u8]>::from(short_slice_u8(&data)))
+                .field("data", &Box::<[u8]>::from(short_slice_u8(data)))
                 .finish(),
             Self::Stop => write!(f, "Stop"),
             Self::Close => write!(f, "Close"),
@@ -147,7 +150,7 @@ impl super::Outgo for Outgo {
                             (
                                 &"GROUPS",
                                 &String::from_utf8_lossy(
-                                    &*groups_score
+                                    &groups_score
                                         .into_iter()
                                         .flat_map(|score| format!("{score} ").into_bytes())
                                         .collect::<Vec<u8>>(),

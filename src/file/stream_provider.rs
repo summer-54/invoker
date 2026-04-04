@@ -1,10 +1,10 @@
 use crate::prelude::*;
 
-use super::Id;
+use tokio::sync::Mutex;
 
 use crate::server::stream::{LoadIncome, LoadOutgo, Stream};
 
-use tokio::sync::Mutex;
+use super::Id;
 
 pub struct StreamProvider<S: Stream<LoadIncome, LoadOutgo>> {
     stream: Mutex<S>,

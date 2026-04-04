@@ -1,17 +1,19 @@
 use std::{path::Path, sync::Arc};
 
-use crate::channel::Channel;
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _};
+
+use crate::{
+    LogState, Result,
+    channel::Channel,
+    sandbox::{self, MaybeLimited, RunStatus},
+};
 
 use super::{
     CHANNEL_DIR, Lang, SOLUTION_EXT, SOLUTION_NAME,
     api::{submission, test},
 };
-use crate::{
-    LogState, Result,
-    sandbox::{self, MaybeLimited, RunStatus},
-};
+
 pub struct Enviroment {
     sandbox: Arc<sandbox::Sandbox>,
     interactor_sandbox: Arc<sandbox::Sandbox>,
@@ -35,11 +37,8 @@ pub async fn prepare(
     let sandbox = Arc::new(Arc::clone(&sandboxes).initialize_sandbox().await?);
     let interactor_sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
-    let log_state = log_state.push("solution_box_id", &*format!("{}", sandbox.id()));
-    let log_state = log_state.push(
-        "interactor_box_id",
-        &*format!("{}", interactor_sandbox.id()),
-    );
+    let log_state = log_state.push("solution_box_id", &format!("{}", sandbox.id()));
+    let log_state = log_state.push("interactor_box_id", &format!("{}", interactor_sandbox.id()));
 
     Ok(Enviroment {
         sandbox,

@@ -1,26 +1,27 @@
+pub use http::Uri;
+
 use crate::prelude::*;
+
+use ratchet_rs::{
+    Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
+    deflate::{DeflateConfig, DeflateDecoder, DeflateEncoder, DeflateExtProvider},
+    subscribe_with,
+};
+use tokio::{
+    net::{TcpStream, ToSocketAddrs},
+    sync::{
+        Mutex,
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    },
+};
+
+use std::{collections::HashMap, sync::Arc};
 
 use super::{
     RawMessage,
     stream::{self, Income, Outgo},
 };
 
-pub use http::Uri;
-use std::{collections::HashMap, sync::Arc};
-use {
-    ratchet_rs::{
-        Receiver, Sender, SubprotocolRegistry, UpgradedClient, WebSocketConfig,
-        deflate::{DeflateConfig, DeflateDecoder, DeflateEncoder, DeflateExtProvider},
-        subscribe_with,
-    },
-    tokio::{
-        net::{TcpStream, ToSocketAddrs},
-        sync::{
-            Mutex,
-            mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-        },
-    },
-};
 const MAX_MESSAGE_SIZE: usize = 1 << 31;
 
 pub struct Stream {
@@ -57,14 +58,14 @@ pub struct Channel {
 impl Channel {
     pub async fn new<A: ToSocketAddrs>(socket_addr: A, uri: Uri) -> Result<Channel> {
         log::trace!("websocket start subscribing");
-        let stream = TcpStream::connect(socket_addr)
+        let tcp_stream = TcpStream::connect(socket_addr)
             .await
             .context("TcpStream connecting")?;
         let client = subscribe_with(
             WebSocketConfig {
                 max_message_size: MAX_MESSAGE_SIZE,
             },
-            stream,
+            tcp_stream,
             uri,
             DeflateExtProvider::with_config(DeflateConfig::default()),
             SubprotocolRegistry::default(),
@@ -87,9 +88,7 @@ impl Channel {
             read: Mutex::new(read),
         })
     }
-}
 
-impl Channel {
     pub async fn new_stream(self: &Arc<Self>, name: &str) -> Stream {
         let (sender, receiver) = unbounded_channel();
         let receiver = Mutex::new(receiver);
@@ -98,7 +97,7 @@ impl Channel {
         Stream {
             name: Box::from(name),
             receiver,
-            channel: Arc::clone(&self),
+            channel: Arc::clone(self),
         }
     }
 
@@ -111,7 +110,7 @@ impl Channel {
                 .read(&mut buf)
                 .await
                 .context("reading websocket messages")?;
-            let Some(endl_pos) = buf.iter().position(|&b| b == ('\n' as u8)) else {
+            let Some(endl_pos) = buf.iter().position(|&b| b == b'\n') else {
                 log::error!("message does not have any endl, so stream name cant be readed");
                 continue;
             };

@@ -1,9 +1,10 @@
 use crate::prelude::*;
 
-use std::sync::Arc;
-
 use invoker_auth::{Cert, Challenge, policy};
+use tar_archive_rs::{self as archive, ArchiveItem};
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
+
+use std::sync::Arc;
 
 use crate::{
     Result, file,
@@ -13,7 +14,6 @@ use crate::{
         stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream, master::FullVerdict},
     },
 };
-use tar_archive_rs::{self as archive, ArchiveItem};
 
 pub struct App<
     P: file::Provider,
@@ -40,7 +40,7 @@ impl<
         package: Box<[u8]>,
     ) -> JoinHandle<crate::Result<judge::api::submission::Result>> {
         use server::stream::MasterOutgo as Outgo;
-        let self_clone = Arc::clone(&self);
+        let self_clone = Arc::clone(self);
         let (sender, mut receiver) = unbounded_channel::<(usize, judge::api::test::Result)>();
         let handler = tokio::spawn(async move {
             while let Some((id, test_result)) = receiver.recv().await {
@@ -72,7 +72,7 @@ impl<
                     .expect("websocket closed unexpectedly");
             }
         });
-        let self_clone = Arc::clone(&self);
+        let self_clone = Arc::clone(self);
 
         tokio::spawn(async move {
             let package = archive::Archive::new(&*package);
@@ -116,7 +116,7 @@ impl<
 
     async fn solve_challenge(&self, challenge: Challenge) -> Result<()> {
         use server::stream::AuthOutgo as Outgo;
-        let solution = challenge.solve(&*self.cert, &policy::StandardPolicy::new())?;
+        let solution = challenge.solve(&self.cert, &policy::StandardPolicy::new())?;
         self.auth_stream
             .send(Outgo::ChallengeSolution(solution))
             .await
@@ -167,7 +167,7 @@ impl<
                         bail!("auth FAILED");
                     }
                 }
-                Income::Challenge(challenge) => (&*self)
+                Income::Challenge(challenge) => self
                     .solve_challenge(challenge)
                     .await
                     .context("solving auth challenge")?,

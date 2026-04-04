@@ -1,5 +1,9 @@
+use crate::prelude::*;
+
+use crate::short_slice_u8;
+
 use super::{MappedRawMessage, RawMessage};
-use crate::{prelude::*, short_slice_u8};
+
 pub enum Income {
     Package(Box<[u8]>),
 }
@@ -8,7 +12,7 @@ impl std::fmt::Debug for Income {
         match self {
             Self::Package(challenge) => f
                 .debug_struct("Package")
-                .field("data", &Box::<[u8]>::from(short_slice_u8(&*challenge)))
+                .field("data", &Box::<[u8]>::from(short_slice_u8(challenge)))
                 .finish(),
         }
     }
