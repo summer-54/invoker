@@ -47,9 +47,9 @@ Configuration for the sandbox manager.
 | Field             | Type    | Description                                                                                                         | Default              |
 |-------------------|---------|---------------------------------------------------------------------------------------------------------------------|----------------------|
 | `sandboxes_count` | `usize` | Maximum number of containers                                                                                        | `1`                  |
-| `box_root`        | `str`   | All sandboxes are created under this directory. This directory and all its ancestors must be writable only by root  | `/.invoker/isolate`  |
-| `lock_root`       | `str`   | Directory where lock files are created                                                                              | `/run/isolate/locks` |
-| `cg_root`         | `str`   | Cgroup root directory                                                                                               | `/run/isolate/cgroup`|
+| `box_root`        | `Path`   | All sandboxes are created under this directory. This directory and all its ancestors must be writable only by root  | `/.invoker/isolate`  |
+| `lock_root`       | `Path`   | Directory where lock files are created                                                                              | `/run/isolate/locks` |
+| `cg_root`         | `Path`   | Cgroup root directory                                                                                               | `/run/isolate/cgroup`|
 | `first_uid`       | `usize` | First `user_id` reserved for sandboxes                                                                              | `60000`              |
 | `first_gid`       | `usize` | First `group_id` reserved for sandboxes                                                                             | `60000`              |
 | `restricted_init` | `bool`  | If `true`, only root can create new sandboxes                                                                       | `false`              |
