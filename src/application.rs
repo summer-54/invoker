@@ -131,8 +131,9 @@ impl<
                 .recv()
                 .await
                 .context("reading master message")?;
+            log::trace!("master stream receive message {msg:?}");
             match msg {
-                Income::Start {
+                Income::Run {
                     package_id,
                     lang,
                     data,

@@ -27,12 +27,11 @@ pub struct MasterStream {
 
 impl Stream<MasterIncome, MasterOutgo> for MasterStream {
     async fn recv(&self) -> Result<MasterIncome> {
-        self.receiver
-            .lock()
-            .await
-            .recv()
-            .await
-            .ok_or(anyhow!("mock sender was closed"))
+        let Some(message) = self.receiver.lock().await.recv().await else {
+            futures::future::pending::<()>().await;
+            unreachable!();
+        };
+        Ok(message)
     }
     async fn send(&self, msg: MasterOutgo) -> Result<()> {
         log::info!("send into mock MASTER stream: {msg:?}");
@@ -60,11 +59,11 @@ pub struct LoadStream {
 
 impl Stream<LoadIncome, LoadOutgo> for LoadStream {
     async fn recv(&self) -> Result<LoadIncome> {
-        let Some(msg) = self.receiver.lock().await.recv().await else {
+        let Some(message) = self.receiver.lock().await.recv().await else {
             futures::future::pending::<()>().await;
             unreachable!()
         };
-        Ok(msg)
+        Ok(message)
     }
     async fn send(&self, msg: LoadOutgo) -> Result<()> {
         log::info!("send into mock LOAD stream: {msg:?}");

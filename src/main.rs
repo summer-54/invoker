@@ -27,9 +27,9 @@ use crate::{
 };
 
 #[cfg(not(feature = "mock"))]
-use crate::{
-    server::websocket::{self, Uri},
-    str::FromStr,
+use {
+    crate::server::websocket::{self, Uri},
+    std::str::FromStr,
 };
 
 const VISIBLE_DATA_LEN: usize = 30;
@@ -74,7 +74,7 @@ struct Communication<
 
 #[cfg(not(feature = "mock"))]
 async fn init_websocket_communication(
-    config: Config,
+    config: Arc<Config>,
 ) -> Result<(
     tokio::task::JoinHandle<Result<()>>,
     Communication<
@@ -168,7 +168,7 @@ async fn main() -> Result<()> {
 
             let data = tokio::fs::read(&name)
                 .await
-                .context("reading file '{name}'")?
+                .context(format!("reading file '{name}'"))?
                 .into_boxed_slice();
             master_sender.send(MasterIncome::Start {
                 package_id,

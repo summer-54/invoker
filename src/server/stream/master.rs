@@ -18,7 +18,7 @@ pub enum FullVerdict {
 }
 #[allow(dead_code)]
 pub enum Income {
-    Start {
+    Run {
         package_id: crate::file::Id,
         lang: crate::judge::Lang,
         data: Box<[u8]>,
@@ -30,7 +30,7 @@ pub enum Income {
 impl std::fmt::Debug for Income {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Start {
+            Self::Run {
                 lang,
                 package_id,
                 data,
@@ -59,7 +59,7 @@ impl super::Income for Income {
                 let Some(package_id) = msg.field("PACKAGE") else {
                     bail!("PACKAGE field not found");
                 };
-                Self::Start {
+                Self::Run {
                     package_id: package_id.parse()?,
                     lang: Lang::try_from(lang)?,
                     data: Box::from(data),

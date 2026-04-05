@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <fstream>
 #pragma GCC optimize("O3,unroll-loops")
 #include <bits/stdc++.h>
 #pragma GCC target("avx,avx2")
@@ -39,7 +41,17 @@ constexpr int INF = 1e9;
 void solve() {
     int a, b;
     cin >> a >> b;
-    cout << 3 << '\n';
+    // vector<int> x(100);
+    ofstream of("a.txt");
+    of << 1 << endl;
+    of = ofstream("b.txt");
+    of << 1 << endl;
+    of = ofstream("c.txt");
+    of << 1 << endl;
+    of = ofstream("d.txt");
+    of << 1 << endl;
+    cout << a + b << endl;
+    // of << 323 << endl;
 }
 
 int main() {
