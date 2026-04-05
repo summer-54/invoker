@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use crate::short_slice_u8;
+use crate::logger::short_slice;
 
 use super::{MappedRawMessage, RawMessage};
 
@@ -12,7 +12,7 @@ impl std::fmt::Debug for Income {
         match self {
             Self::Package(challenge) => f
                 .debug_struct("Package")
-                .field("data", &Box::<[u8]>::from(short_slice_u8(challenge)))
+                .field("data", &Box::<[u8]>::from(short_slice(challenge)))
                 .finish(),
         }
     }
@@ -20,9 +20,11 @@ impl std::fmt::Debug for Income {
 impl super::Income for Income {
     fn from_raw(msg: MappedRawMessage) -> Result<Self> {
         Ok(match msg.ty() {
-            "PACKAGE" => Self::Package(Box::from(msg.data().ok_or(anyhow!("data not found"))?)),
+            "PACKAGE" => Self::Package(Box::from(
+                msg.data().ok_or(anyhow!("{} not found", "data".bold()))?,
+            )),
             command => {
-                bail!("incomming websocket message: incorrect command: {command}");
+                bail!("incorrect command '{}'", command.bold());
             }
         })
     }

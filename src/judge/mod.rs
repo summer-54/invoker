@@ -1,4 +1,5 @@
 pub mod api;
+mod sandbox;
 // mod double_run;
 mod consts;
 mod interactive;
@@ -22,57 +23,26 @@ use std::{
     collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, sync::Arc,
 };
 
-use crate::{
-    LogState, Result,
-    sandbox::{self, Command, MaybeLimited},
-};
+use crate::{LogState, Result};
 
 use api::{
+    Lang,
     submission::{self, Task},
     test,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Lang {
-    #[serde(rename = "g++")]
-    Gpp,
-    #[serde(rename = "python3")]
-    Python,
-}
-
-impl TryFrom<&str> for Lang {
-    type Error = Error;
-    fn try_from(s: &str) -> Result<Self> {
-        match &*s.to_lowercase() {
-            "g++" => Ok(Lang::Gpp),
-            "python3" => Ok(Lang::Python),
-            _ => bail!("unknown language: {}", s),
-        }
-    }
-}
-
-impl Lang {
-    pub fn command_to_run(&self, name: &str) -> Command {
-        match self {
-            Self::Gpp => Command::new(format!("./{name}")),
-            Self::Python => {
-                let mut cmd = Command::new(PYTHON3_BIN_PATH);
-                cmd.arg(name);
-                cmd
-            }
-        }
-    }
-}
+use sandbox::{Command, MaybeLimited};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
+    path_to_isolate: Box<Path>,
     compilation_commands: HashMap<Lang, Box<[Box<str>]>>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            path_to_isolate: Path::new("/usr/bin/isolate").into(),
             compilation_commands: vec![
                 (
                     Lang::Gpp,
@@ -135,24 +105,23 @@ pub trait Enviroment: Send {
 }
 
 impl Service {
-    pub async fn new(
-        config_dir: impl AsRef<Path>,
-        sandboxes: Arc<sandbox::Service>,
-        work_dir: impl AsRef<Path>,
-    ) -> Service {
+    pub async fn new(config_dir: impl AsRef<Path>, work_dir: impl AsRef<Path>) -> Result<Service> {
+        let config = Config::load(&config_dir).await;
+        let sandboxes = sandbox::Service::new(config_dir, config.path_to_isolate.clone()).await?;
+
         if !tokio::fs::try_exists(&work_dir).await.unwrap() {
             create_dir(&work_dir).await.unwrap();
         }
         if !tokio::fs::try_exists(consts::CHANNEL_DIR).await.unwrap() {
             create_dir_all(consts::CHANNEL_DIR).await.unwrap();
         }
-        Service {
-            config: Config::load(config_dir).await,
+        Ok(Service {
+            config,
             work_dir: work_dir.as_ref().into(),
             sandboxes,
             handler: Mutex::new(None),
             semaphore: Semaphore::new(1),
-        }
+        })
     }
 
     pub async fn cancel_all_tests(&self) -> Result<()> {
@@ -172,7 +141,7 @@ impl Service {
             .context("sandbox initializing")?;
 
         let mut log_state = LogState::new();
-        log_state = log_state.push("box", &format!("{}", sandbox.id()));
+        log_state = log_state.push("box", sandbox.id());
 
         sandbox
             .write_into_box(
@@ -263,7 +232,7 @@ impl Service {
         for group in task.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
                 let mut log_state = LogState::new();
-                log_state = log_state.push("test", &format!("{test_number}"));
+                log_state = log_state.push("test", test_number);
                 log::trace!("({log_state}) looking on test");
 
                 if blocked_groups.lock().await[group.id].is_some() {

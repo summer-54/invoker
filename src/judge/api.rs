@@ -1,9 +1,51 @@
-pub mod test {
-    use std::{fmt::Debug, sync::Arc};
+use crate::prelude::*;
 
+use serde::{Deserialize, Serialize};
+
+use super::consts::*;
+
+use super::sandbox::Command;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Lang {
+    #[serde(rename = "g++")]
+    Gpp,
+    #[serde(rename = "python3")]
+    Python,
+}
+
+impl TryFrom<&str> for Lang {
+    type Error = Error;
+    fn try_from(s: &str) -> Result<Self> {
+        match &*s.to_lowercase() {
+            "g++" => Ok(Lang::Gpp),
+            "python3" => Ok(Lang::Python),
+            _ => bail!("unknown language: {}", s),
+        }
+    }
+}
+
+impl Lang {
+    pub fn command_to_run(&self, name: &str) -> Command {
+        match self {
+            Self::Gpp => Command::new(format!("./{name}")),
+            Self::Python => {
+                let mut cmd = Command::new(PYTHON3_BIN_PATH);
+                cmd.arg(name);
+                cmd
+            }
+        }
+    }
+}
+pub mod test {
     use serde::{Deserialize, Serialize};
 
-    use crate::{VISIBLE_DATA_LEN, sandbox};
+    use std::{fmt::Debug, sync::Arc};
+
+    use crate::logger::short_str;
+
+    use super::super::sandbox;
     #[derive(Clone)]
     pub struct Result {
         pub verdict: Verdict,
@@ -20,22 +62,8 @@ pub mod test {
                 .field("verdict", &self.verdict)
                 .field("time", &self.time)
                 .field("memory", &self.memory)
-                .field(
-                    "output",
-                    &self
-                        .output
-                        .chars()
-                        .take(VISIBLE_DATA_LEN)
-                        .collect::<String>(),
-                )
-                .field(
-                    "message",
-                    &self
-                        .message
-                        .chars()
-                        .take(VISIBLE_DATA_LEN)
-                        .collect::<String>(),
-                )
+                .field("output", &short_str(&self.output))
+                .field("message", &short_str(&self.message))
                 .finish()
         }
     }

@@ -1,16 +1,16 @@
+use crate::prelude::*;
+
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _, task::JoinHandle};
 
 use std::{path::Path, sync::Arc};
 
-use crate::{
-    LogState, Result,
-    sandbox::{self, Command, MaybeLimited::*, RunStatus},
-};
+use crate::{LogState, Result};
 
 use super::{
-    Lang, SOLUTION_EXT, SOLUTION_NAME,
-    api::{submission, test},
+    api::{Lang, submission, test},
+    consts::*,
+    sandbox::{self, Command, MaybeLimited::*, RunStatus},
 };
 
 const CHECKER_NAME: &str = "checker";
@@ -43,7 +43,7 @@ pub async fn prepare(
 ) -> Result<Enviroment> {
     let sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
-    let log_state = log_state.push("box_id", &format!("{}", sandbox.id()));
+    let log_state = log_state.push("box_id", sandbox.id());
 
     Ok(Enviroment {
         sandbox,
@@ -59,7 +59,7 @@ pub async fn prepare(
 impl super::Enviroment for Enviroment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
         let log_state = self.log_state.push("task type", "STANDARD");
-        log::trace!("({log_state}) testing STARTED");
+        log::trace!("({log_state}) testing started");
         let src_input_path = self
             .work_dir
             .join(INPUT_DIR)
@@ -90,9 +90,24 @@ impl super::Enviroment for Enviroment {
         Arc::clone(&self.sandbox)
             .write_group_into_box(
                 vec![
-                    (File::open(&*src_input_path).await?, TARGET_INPUT_PATH),
-                    (File::open(&*src_checker_path).await?, TARGET_CHECKER_PATH),
-                    (File::open(&*src_solution_path).await?, TARGET_SOLUTION_PATH),
+                    (
+                        File::open(&*src_input_path)
+                            .await
+                            .context("open src input")?,
+                        TARGET_INPUT_PATH,
+                    ),
+                    (
+                        File::open(&*src_checker_path)
+                            .await
+                            .context("open src checker")?,
+                        TARGET_CHECKER_PATH,
+                    ),
+                    (
+                        File::open(&*src_solution_path)
+                            .await
+                            .context("open src solution")?,
+                        TARGET_SOLUTION_PATH,
+                    ),
                 ]
                 .into_iter()
                 .map(|(from, to)| (from, Path::new(to)))
@@ -117,14 +132,17 @@ impl super::Enviroment for Enviroment {
         let solution_result = match self.sandbox.run(&solution_cmd).await {
             Ok(res) => res,
             Err(e) => {
-                log::error!("({log_state}) solution run error: {e:?}");
+                log::error!("{log_state} solution run error: {e}");
                 return Err(e);
             }
         };
 
         let mut output_file = self.sandbox.read_from_box(TARGET_OUTPUT_PATH).await?;
         let mut output = String::new();
-        output_file.read_to_string(&mut output).await?;
+        output_file
+            .read_to_string(&mut output)
+            .await
+            .context("reading output file")?;
         let output = Arc::from(output.as_str());
 
         if let Some(verdict) = test::Verdict::from_run_status(solution_result.status) {
@@ -146,9 +164,10 @@ impl super::Enviroment for Enviroment {
         if let Ok(mut correct) = File::open(&*src_correct_path).await {
             self.sandbox
                 .write_into_box(&mut correct, TARGET_CORRECT_PATH)
-                .await?;
+                .await
+                .context("writing into box target correct")?;
         } else {
-            log::debug!("({log_state}) correct file not founded");
+            log::debug!("{log_state} correct file not founded");
         }
 
         let mut checker_cmd = Command::new(format!("./{TARGET_CHECKER_PATH}"));
@@ -162,7 +181,7 @@ impl super::Enviroment for Enviroment {
         let checker_result = match self.sandbox.run(&checker_cmd).await {
             Ok(res) => res,
             Err(e) => {
-                log::error!("({log_state}) checker error: {e:?}");
+                log::error!("{log_state} checker error: {e}");
                 return Err(e);
             }
         };
@@ -172,7 +191,8 @@ impl super::Enviroment for Enviroment {
             let mut output = String::new();
             sandbox_clone
                 .read_from_box(TARGET_CHECKER_OUTPUT_PATH)
-                .await?
+                .await
+                .context("reading from box checker output")?
                 .read_to_string(&mut output)
                 .await?;
             Ok(output)
@@ -183,7 +203,8 @@ impl super::Enviroment for Enviroment {
             let mut output = String::new();
             sandbox_clone
                 .read_from_box(TARGET_CHECKER_ERROR_PATH)
-                .await?
+                .await
+                .context("reading from box checker error")?
                 .read_to_string(&mut output)
                 .await?;
             Ok(output)

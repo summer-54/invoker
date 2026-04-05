@@ -145,7 +145,7 @@ impl Service {
     pub async fn initialize_sandbox(self: Arc<Self>) -> Result<Sandbox> {
         let box_id = self.boxes_pull.take().await;
         let mut log_state = LogState::new();
-        log_state = log_state.push("box", &format!("{box_id}"));
+        log_state = log_state.push("box", box_id);
         log::debug!("({log_state}) starting");
         let output = TokioCommand::new(&*self.path)
             .arg("--init")
@@ -215,7 +215,7 @@ impl Drop for Sandbox {
         let service = Arc::clone(&self.service);
         let id = self.id;
 
-        let log_state = LogState::new().push("box", &format!("{id}"));
+        let log_state = LogState::new().push("box", id);
         tokio::spawn(async move {
             service.boxes_pull.put(id);
             log::trace!("({log_state}) returned to boxes pull");
@@ -248,7 +248,7 @@ impl Sandbox {
         let target = target.clone();
         let meta_path = self.inner_dir().join("meta");
         let mut log_st = LogState::new();
-        log_st = log_st.push("box", &format!("{}", self.id()));
+        log_st = log_st.push("box", self.id());
 
         let mut command = TokioCommand::new(&*self.service.path);
         command
@@ -388,7 +388,7 @@ impl Sandbox {
         to: impl AsRef<Path>,
     ) -> Result<()> {
         let mut log_st = LogState::new();
-        log_st = log_st.push("box", &format!("{}", self.id()));
+        log_st = log_st.push("box", self.id());
 
         _ = tokio::io::copy(from, &mut {
             let file = File::create(self.inner_dir().join(&to))
@@ -399,9 +399,10 @@ impl Sandbox {
                 .context("setting permissions")?;
             file
         })
-        .await?;
+        .await
+        .context("copying file")?;
         log::trace!(
-            "({log_st}) copied '{}' to '{}'",
+            "{log_st} copied '{}' to '{}'",
             to.as_ref().display().to_string().bold(),
             self.inner_dir().join(to).display().to_string().bold(),
         );
@@ -428,10 +429,10 @@ impl Sandbox {
 
     pub async fn read_from_box(&self, from: impl AsRef<Path>) -> Result<File> {
         let mut log_st = LogState::new();
-        log_st = log_st.push("box", &format!("{}", self.id()));
+        log_st = log_st.push("box", self.id());
 
         log::trace!(
-            "({log_st}) open '{}'",
+            "{log_st} open '{}'",
             self.inner_dir().join(&from).display().to_string().bold()
         );
         Ok(tokio::fs::File::open(self.inner_dir().join(from)).await?)

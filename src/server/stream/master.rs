@@ -1,7 +1,9 @@
+use crate::prelude::*;
+
 use crate::{
-    judge::{Lang, api::test::Verdict},
-    prelude::*,
-    short_slice_u8,
+    file::Id,
+    judge::api::{Lang, test::Verdict},
+    logger::short_slice,
 };
 
 use super::{MappedRawMessage, RawMessage};
@@ -19,8 +21,8 @@ pub enum FullVerdict {
 #[allow(dead_code)]
 pub enum Income {
     Run {
-        package_id: crate::file::Id,
-        lang: crate::judge::Lang,
+        package_id: Id,
+        lang: Lang,
         data: Box<[u8]>,
     },
     Stop,
@@ -38,7 +40,7 @@ impl std::fmt::Debug for Income {
                 .debug_struct("Start")
                 .field("package_id", package_id)
                 .field("lang", lang)
-                .field("data", &Box::<[u8]>::from(short_slice_u8(data)))
+                .field("data", &Box::<[u8]>::from(short_slice(data)))
                 .finish(),
             Self::Stop => write!(f, "Stop"),
             Self::Close => write!(f, "Close"),
@@ -51,24 +53,24 @@ impl super::Income for Income {
         Ok(match msg.ty() {
             "START" => {
                 let Some(data) = msg.data() else {
-                    bail!("data not found");
+                    bail!("{} not found", "data".bold());
                 };
                 let Some(lang) = msg.field("LANG") else {
-                    bail!("LANG field not found");
+                    bail!("{} field not found", "LANG".bold());
                 };
                 let Some(package_id) = msg.field("PACKAGE") else {
-                    bail!("PACKAGE field not found");
+                    bail!("{} field not found", "PACKAGE".bold());
                 };
                 Self::Run {
-                    package_id: package_id.parse()?,
-                    lang: Lang::try_from(lang)?,
+                    package_id: package_id.parse().context("parsing package id")?,
+                    lang: Lang::try_from(lang).context("parsing lang")?,
                     data: Box::from(data),
                 }
             }
             "STOP" => Self::Stop,
             "CLOSE" => Self::Close,
             command => {
-                bail!("incomming websocket message: incorrect command: {command}");
+                bail!("incorrect command '{}'", command.bold());
             }
         })
     }
@@ -122,7 +124,7 @@ impl std::fmt::Debug for Outgo {
                 .field("verdict", verdict)
                 .field("time", time)
                 .field("memory", memory)
-                .field("data", &Box::<[u8]>::from(short_slice_u8(data)))
+                .field("data", &Box::<[u8]>::from(short_slice(data)))
                 .finish(),
             Self::Exited { code, data } => f
                 .debug_struct("Exited")

@@ -7,7 +7,6 @@ mod logger;
 #[cfg(feature = "mock")]
 mod mock;
 mod prelude;
-mod sandbox;
 mod server;
 
 use prelude::*;
@@ -31,12 +30,6 @@ use {
     crate::server::websocket::{self, Uri},
     std::str::FromStr,
 };
-
-const VISIBLE_DATA_LEN: usize = 30;
-
-fn short_slice_u8(data: &[u8]) -> &[u8] {
-    &data[..std::cmp::min(data.len(), VISIBLE_DATA_LEN)]
-}
 #[derive(Clone, Deserialize, Debug)]
 struct Config {
     #[cfg(feature = "mock")]
@@ -47,7 +40,6 @@ struct Config {
     pub work_dir: Box<Path>,
     pub cache_dir: Box<Path>,
 
-    pub isolate_exe_path: Box<Path>,
     pub cert_name: Box<str>,
     pub cert_path: Box<str>,
 }
@@ -133,14 +125,12 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     if !nix::unistd::Uid::current().is_root() {
-        println!("{}", "must started as root".red().bold());
         bail!("must started as root");
     }
 
     let config = Arc::new(Config::init().await?);
 
     if !tokio::fs::try_exists(&*config.config_dir).await? {
-        log::error!("config directory: '{:?}' not founded", config.config_dir);
         bail!("config directory: '{:?}' not founded", config.config_dir);
     }
 
@@ -159,7 +149,7 @@ async fn main() -> Result<()> {
             let Some(lang) = args.next() else {
                 bail!("lang was not founded")
             };
-            let lang = judge::Lang::try_from(&*lang)?;
+            let lang = judge::api::Lang::try_from(&*lang)?;
 
             let Some(package_id) = args.next() else {
                 bail!("package id was not founded")
@@ -170,7 +160,7 @@ async fn main() -> Result<()> {
                 .await
                 .context(format!("reading file '{name}'"))?
                 .into_boxed_slice();
-            master_sender.send(MasterIncome::Start {
+            master_sender.send(MasterIncome::Run {
                 package_id,
                 lang,
                 data,
@@ -179,9 +169,6 @@ async fn main() -> Result<()> {
         communication
     };
     let cert = Cert::from_file(&*config.cert_path)?;
-    let isolate_service =
-        sandbox::Service::new(&config.config_dir, config.isolate_exe_path.clone()).await?;
-
     let inner_provider = file::stream_provider::StreamProvider::new(communication.load_stream);
     let file_provider =
         file::CachingProvider::init(config.cache_dir.clone(), inner_provider).await?;
@@ -189,9 +176,7 @@ async fn main() -> Result<()> {
     let app = App {
         master_stream: communication.master_stream,
         auth_stream: communication.auth_stream,
-        judge_service: Arc::new(
-            judge::Service::new(&config.config_dir, isolate_service, judger_work_dir).await,
-        ),
+        judge_service: Arc::new(judge::Service::new(&config.config_dir, judger_work_dir).await?),
         cert: Arc::new(cert),
         file_provider,
     };
@@ -206,19 +191,8 @@ async fn main() -> Result<()> {
     .await?;
 
     let app = Arc::new(app);
-    let result = app.run();
-    // for name in std::env::args().skip(1) {
-    //     app.start_judgment(
-    //         tokio::fs::read(name.as_str())
-    //             .await
-    //             .context("reading file '{name}'")?
-    //             .into_boxed_slice(),
-    //     );
-    // }
 
-    let result = result.await;
-
-    match result {
+    match app.run().await.context("App::run()") {
         Ok(_) => {
             Stream::<MasterIncome, MasterOutgo>::send(
                 &app.master_stream,

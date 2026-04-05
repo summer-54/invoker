@@ -5,18 +5,33 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 };
 
-use crate::server::stream::{
-    AuthIncome, AuthOutgo, LoadIncome, LoadOutgo, MasterIncome, MasterOutgo, Stream,
+use crate::{
+    logger::LogState,
+    server::stream::{
+        AuthIncome, AuthOutgo, LoadIncome, LoadOutgo, MasterIncome, MasterOutgo, Stream,
+    },
 };
 
+async fn eternal() -> ! {
+    futures::future::pending().await
+}
+
 pub struct AuthStream;
+impl AuthStream {
+    fn log_state() -> std::sync::Arc<LogState> {
+        LogState::new().push("stream", "mock::auth")
+    }
+}
 
 impl Stream<AuthIncome, AuthOutgo> for AuthStream {
     async fn recv(&self) -> Result<AuthIncome> {
-        futures::future::pending().await
+        let log_state = Self::log_state();
+        log::trace!("{log_state} waiting message... (eternal)");
+        eternal().await
     }
     async fn send(&self, msg: AuthOutgo) -> Result<()> {
-        log::info!("send into mock AUTH stream: {msg:?}");
+        let log_state = Self::log_state();
+        log::info!("{log_state} <- {msg:?}");
         Ok(())
     }
 }
@@ -25,16 +40,26 @@ pub struct MasterStream {
     receiver: Mutex<UnboundedReceiver<MasterIncome>>,
 }
 
+impl MasterStream {
+    fn log_state() -> std::sync::Arc<LogState> {
+        LogState::new().push("stream", "mock::master")
+    }
+}
+
 impl Stream<MasterIncome, MasterOutgo> for MasterStream {
     async fn recv(&self) -> Result<MasterIncome> {
-        let Some(message) = self.receiver.lock().await.recv().await else {
-            futures::future::pending::<()>().await;
-            unreachable!();
+        let log_state = Self::log_state();
+        log::trace!("{log_state} waiting message...");
+        let Some(msg) = self.receiver.lock().await.recv().await else {
+            log::trace!("{log_state} receiver closed");
+            eternal().await
         };
-        Ok(message)
+        log::info!("{log_state} -> {msg:?}");
+        Ok(msg)
     }
     async fn send(&self, msg: MasterOutgo) -> Result<()> {
-        log::info!("send into mock MASTER stream: {msg:?}");
+        let log_state = Self::log_state();
+        log::info!("{log_state} <- {msg:?}");
         Ok(())
     }
 }
@@ -57,16 +82,26 @@ pub struct LoadStream {
     dir: Box<Path>,
 }
 
+impl LoadStream {
+    fn log_state() -> std::sync::Arc<LogState> {
+        LogState::new().push("stream", "mock::load")
+    }
+}
+
 impl Stream<LoadIncome, LoadOutgo> for LoadStream {
     async fn recv(&self) -> Result<LoadIncome> {
-        let Some(message) = self.receiver.lock().await.recv().await else {
-            futures::future::pending::<()>().await;
-            unreachable!()
+        let log_state = Self::log_state();
+        log::trace!("{log_state} waiting message...");
+        let Some(msg) = self.receiver.lock().await.recv().await else {
+            log::trace!("{log_state} receiver closed");
+            eternal().await
         };
-        Ok(message)
+        log::info!("{log_state} -> {msg:?}");
+        Ok(msg)
     }
     async fn send(&self, msg: LoadOutgo) -> Result<()> {
-        log::info!("send into mock LOAD stream: {msg:?}");
+        let log_state = Self::log_state();
+        log::info!("{log_state} <- {msg:?}");
         match msg {
             LoadOutgo::Load { package_id } => {
                 let sender = self.sender.clone();
@@ -75,16 +110,17 @@ impl Stream<LoadIncome, LoadOutgo> for LoadStream {
                     let data = match tokio::fs::read(&path).await {
                         Ok(data) => data.into(),
                         Err(error) => {
+                            log::error!("{error}");
                             log::error!(
-                                "mock loader can't found package: {}, {}",
-                                path.display(),
-                                error
+                                "{log_state} package {} not found in {}",
+                                package_id.to_string().bold(),
+                                path.display().to_string().bright_white(),
                             );
                             return;
                         }
                     };
                     if let Err(error) = sender.send(LoadIncome::Package(data)) {
-                        log::error!("error while sending message: {error}");
+                        log::error!("{log_state} internal sender error: {error}");
                     }
                 });
             }

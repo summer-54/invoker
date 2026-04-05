@@ -1,6 +1,8 @@
+use crate::prelude::*;
+
 use invoker_auth::{Challenge, Solution};
 
-use crate::{prelude::*, short_slice_u8};
+use crate::logger::short_slice;
 
 use super::{MappedRawMessage, RawMessage};
 
@@ -17,7 +19,7 @@ impl std::fmt::Debug for Income {
             }
             Self::Challenge(challenge) => f
                 .debug_struct("Challenge")
-                .field("data", &Box::<[u8]>::from(short_slice_u8(challenge)))
+                .field("data", &Box::<[u8]>::from(short_slice(challenge)))
                 .finish(),
         }
     }
@@ -33,7 +35,7 @@ impl super::Income for Income {
                 Self::Challenge(Challenge::from(data))
             }
             command => {
-                bail!("incomming websocket message: incorrect command: {command}");
+                bail!("incorrect command '{}'", command.bold());
             }
         })
     }
@@ -48,7 +50,7 @@ impl std::fmt::Debug for Outgo {
         match self {
             Self::ChallengeSolution(data) => f
                 .debug_struct("ChallengeSolution")
-                .field("data", &Box::<[u8]>::from(short_slice_u8(data)))
+                .field("data", &Box::<[u8]>::from(short_slice(data)))
                 .finish(),
         }
     }

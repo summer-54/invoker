@@ -2,12 +2,22 @@ use crate::prelude::*;
 
 use std::{fmt::Display, sync::Arc};
 
-pub struct LogState(Option<(Arc<LogState>, Box<str>, Box<str>)>);
+pub struct LogState(
+    Option<(
+        Arc<LogState>,
+        Box<dyn Display + Sync + Send>,
+        Box<dyn Display + Sync + Send>,
+    )>,
+);
 impl LogState {
     pub fn new() -> Arc<Self> {
         Arc::new(LogState(None))
     }
-    pub fn push(self: &Arc<Self>, key: &str, value: &str) -> Arc<Self> {
+    pub fn push(
+        self: &Arc<Self>,
+        key: impl Display + 'static + Sync + Send,
+        value: impl Display + 'static + Sync + Send,
+    ) -> Arc<Self> {
         Arc::new(LogState(Some((
             Arc::clone(self),
             Box::from(key),
@@ -22,9 +32,30 @@ impl Display for LogState {
             if prev.0.is_some() {
                 write!(f, "{prev} ")?;
             }
-            write!(f, "{}<{}>", key.green(), value.cyan())
+            write!(
+                f,
+                "{}<{}>",
+                format!("{key}").green(),
+                format!("{value}").cyan()
+            )
         } else {
             Ok(())
         }
     }
+}
+
+const VISIBLE_DATA_LEN: usize = 30;
+
+pub fn short_slice<T>(data: &[T]) -> &[T] {
+    &data[..std::cmp::min(data.len(), VISIBLE_DATA_LEN)]
+}
+
+pub fn short_str(data: &str) -> &str {
+    let len = data
+        .char_indices()
+        .nth(VISIBLE_DATA_LEN)
+        .map(|(i, _)| i)
+        .unwrap_or(data.len());
+
+    &data[..std::cmp::min(data.len(), len)]
 }

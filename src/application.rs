@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::{
     Result, file,
-    judge::{self, Lang},
+    judge::{self, api::Lang},
     server::{
         self,
         stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream, master::FullVerdict},
@@ -55,8 +55,9 @@ impl<
                     },
                 ])
                 .await
+                .context("archiving test verdict")
                 .unwrap_or_else(|e| {
-                    log::error!("sending 'TestVerdict': compression error: {e:?}");
+                    log::error!("{e}");
                     vec![].into_boxed_slice()
                 });
                 self_clone
@@ -69,7 +70,8 @@ impl<
                         data,
                     })
                     .await
-                    .expect("websocket closed unexpectedly");
+                    .context("sending test verdict")
+                    .unwrap_or_else(|e| log::error!("{e}"));
             }
         });
         let self_clone = Arc::clone(self);
@@ -78,7 +80,8 @@ impl<
             let package = archive::Archive::new(&*package);
             let result = Arc::clone(&self_clone.judge_service)
                 .judge(package, lang, solution, sender)
-                .await;
+                .await
+                .context("judging");
             _ = handler.await;
             match &result {
                 Ok(full_verdict) => self_clone
@@ -95,16 +98,16 @@ impl<
                         judge::api::submission::Result::Te(msg) => FullVerdict::Te(msg.clone()),
                     }))
                     .await
-                    .map_err(|e| {
-                        log::error!("sending message error: {e:?}");
-                    })
-                    .expect("message sending error"),
+                    .context("sending full verdict")
+                    .unwrap_or_else(|e| {
+                        log::error!("sending message error: {e}");
+                    }),
                 Err(e) => {
-                    log::error!("judger error: {e:?}");
+                    log::error!("{e}");
                     self_clone
                         .master_stream
                         .send(Outgo::Error {
-                            msg: e.to_string().into_boxed_str(),
+                            msg: e.to_string().into(),
                         })
                         .await
                         .unwrap();
@@ -116,29 +119,35 @@ impl<
 
     async fn solve_challenge(&self, challenge: Challenge) -> Result<()> {
         use server::stream::AuthOutgo as Outgo;
-        let solution = challenge.solve(&self.cert, &policy::StandardPolicy::new())?;
+        let solution = challenge
+            .solve(&self.cert, &policy::StandardPolicy::new())
+            .context("solving auth challenge")?;
         self.auth_stream
             .send(Outgo::ChallengeSolution(solution))
             .await
     }
 
     async fn listen_master_stream(self: Arc<Self>) -> Result<()> {
-        use server::stream::master::Income;
-        log::info!("master channel listener open");
+        use server::stream::MasterIncome as Income;
+        log::info!("master stream listener open");
         loop {
             let msg = self
                 .master_stream
                 .recv()
                 .await
                 .context("reading master message")?;
-            log::trace!("master stream receive message {msg:?}");
+            log::trace!("master stream receive message {msg:#?}");
             match msg {
                 Income::Run {
                     package_id,
                     lang,
                     data,
                 } => {
-                    let package = self.file_provider.get(package_id).await?;
+                    let package = self
+                        .file_provider
+                        .get(package_id)
+                        .await
+                        .context("file provider get package")?;
                     _ = self.start_judgment(lang, data, package)
                 }
                 Income::Stop => self
@@ -149,19 +158,20 @@ impl<
                 Income::Close => break,
             }
         }
-        log::info!("message listner close");
+        log::info!("master stream listner close");
         Result::<()>::Ok(())
     }
 
     async fn listen_auth_stream(self: Arc<Self>) -> Result<()> {
-        use server::stream::auth::Income;
-        log::info!("auth channel listener open");
+        use server::stream::AuthIncome as Income;
+        log::info!("auth stream listener open");
         loop {
             let msg = self
                 .auth_stream
                 .recv()
                 .await
                 .context("reading auth message")?;
+            log::trace!("auth stream receive message {msg:#?}");
             match msg {
                 Income::Verdict(verdict) => {
                     if !verdict {
@@ -178,8 +188,8 @@ impl<
 
     pub async fn run(self: &Arc<Self>) -> Result<()> {
         tokio::select! {
-            res = tokio::spawn(Arc::clone(self).listen_master_stream()) => res?,
-            res = tokio::spawn(Arc::clone(self).listen_auth_stream()) => res?,
+            res = tokio::spawn(Arc::clone(self).listen_master_stream()) => res.context("listening master stream")?,
+            res = tokio::spawn(Arc::clone(self).listen_auth_stream()) => res.context("listening auth stream")?,
         }
     }
 }

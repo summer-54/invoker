@@ -4,9 +4,10 @@ pub mod websocket;
 
 use crate::prelude::*;
 
-use crate::short_slice_u8;
-
 use std::{collections::HashMap, sync::Arc};
+
+use crate::logger::short_slice;
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct MappedRawMessage {
@@ -24,7 +25,7 @@ impl std::fmt::Debug for RawMessage {
         let mut s = f.debug_struct(&self.ty);
         s.field("fields", &self.fields);
         if let Some(data) = &self.data {
-            s.field("data", &Box::<[u8]>::from(short_slice_u8(data)));
+            s.field("data", &Box::<[u8]>::from(short_slice(data)));
         }
         s.finish()
     }
@@ -57,7 +58,7 @@ impl TryFrom<&[u8]> for RawMessage {
         };
 
         let Some(ty) = ty else {
-            bail!("cannot parse raw msg, field 'TYPE' not found")
+            bail!("field '{}' not found", "TYPE".bold())
         };
 
         Ok(Self { ty, fields, data })
