@@ -2,13 +2,12 @@ use crate::prelude::*;
 
 use std::{fmt::Display, sync::Arc};
 
-pub struct LogState(
-    Option<(
-        Arc<LogState>,
-        Box<dyn Display + Sync + Send>,
-        Box<dyn Display + Sync + Send>,
-    )>,
-);
+type LogStateInner = Option<(
+    Arc<LogState>,
+    Box<dyn Display + Sync + Send>,
+    Box<dyn Display + Sync + Send>,
+)>;
+pub struct LogState(LogStateInner);
 impl LogState {
     pub fn new() -> Arc<Self> {
         Arc::new(LogState(None))
@@ -26,21 +25,29 @@ impl LogState {
     }
 }
 
-impl Display for LogState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl LogState {
+    pub fn inner_fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((prev, key, value)) = &self.0 {
             if prev.0.is_some() {
                 write!(f, "{prev} ")?;
             }
             write!(
                 f,
-                "{}<{}>",
+                "{} = {}, ",
                 format!("{key}").green(),
                 format!("{value}").cyan()
             )
         } else {
             Ok(())
         }
+    }
+}
+
+impl Display for LogState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        self.inner_fmt(f)?;
+        write!(f, "]")
     }
 }
 

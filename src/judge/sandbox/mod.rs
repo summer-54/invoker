@@ -82,15 +82,15 @@ impl configo::Config for IsolateConfig {
 }
 
 impl IsolateConfig {
-    pub async fn write_config_file(&self) {
+    pub async fn write_config_file(&self) -> Result<()> {
         let mut isolate_config_file = File::create(ISOLATE_CONFIG_PATH).await.unwrap();
         isolate_config_file
             .write_all(
                 format!(
                     "box_root={}\nlock_root={}\ncg_root={}\nfirst_uid={}\nfirst_gid={}\nnum_boxes={}\nrestricted_init={}\n",
-                    self.box_root.to_str().unwrap(),
-                    self.lock_root.to_str().unwrap(),
-                    self.cg_root.to_str().unwrap(),
+                    self.box_root.to_string_lossy(),
+                    self.lock_root.to_string_lossy(),
+                    self.cg_root.to_string_lossy(),
                     self.first_uid,
                     self.first_gid,
                     self.sandboxes_count,
@@ -102,8 +102,7 @@ impl IsolateConfig {
                 )
                 .as_bytes(),
             )
-            .await
-            .unwrap();
+            .await.context("writing in file")
     }
 }
 
@@ -132,8 +131,13 @@ impl Service {
             ));
         }
 
-        let config = IsolateConfig::load(config_dir).await;
-        config.write_config_file().await;
+        let config = IsolateConfig::load(config_dir)
+            .await
+            .context("loading config")?;
+        config
+            .write_config_file()
+            .await
+            .context("writing in file for isolate")?;
 
         Ok(Arc::new(Service {
             boxes_pull: (0..config.sandboxes_count).collect(),
@@ -152,7 +156,7 @@ impl Service {
             .arg(format!("--box-id={box_id}"))
             .output()
             .await
-            .unwrap();
+            .context("executing command")?;
         if output.status.success() {
             log::debug!("({log_state}) started successfully");
             Ok(Sandbox {
@@ -174,14 +178,15 @@ impl Service {
         }
     }
 
-    pub async fn clean(self: Arc<Self>) {
+    pub async fn clean(self: Arc<Self>) -> Result<()> {
         log::info!("isolate cleannig started");
         let status = TokioCommand::new(&*self.path)
             .arg("--cleanup")
             .status()
             .await
-            .unwrap();
-        log::info!("isolate cleaned with status: {status}")
+            .context("executing command")?;
+        log::info!("isolate cleaned with status: {status}");
+        Ok(())
     }
 }
 

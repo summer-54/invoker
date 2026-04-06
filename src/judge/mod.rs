@@ -106,14 +106,24 @@ pub trait Enviroment: Send {
 
 impl Service {
     pub async fn new(config_dir: impl AsRef<Path>, work_dir: impl AsRef<Path>) -> Result<Service> {
-        let config = Config::load(&config_dir).await;
+        let config = Config::load(&config_dir)
+            .await
+            .context("loading judge config")?;
         let sandboxes = sandbox::Service::new(config_dir, config.path_to_isolate.clone()).await?;
 
-        if !tokio::fs::try_exists(&work_dir).await.unwrap() {
-            create_dir(&work_dir).await.unwrap();
+        if !tokio::fs::try_exists(&work_dir)
+            .await
+            .context("checking work dir")?
+        {
+            create_dir(&work_dir).await.context("creating work dir")?;
         }
-        if !tokio::fs::try_exists(consts::CHANNEL_DIR).await.unwrap() {
-            create_dir_all(consts::CHANNEL_DIR).await.unwrap();
+        if !tokio::fs::try_exists(consts::CHANNEL_DIR)
+            .await
+            .context("checking channel dir")?
+        {
+            create_dir_all(consts::CHANNEL_DIR)
+                .await
+                .context("creating channel dir")?;
         }
         Ok(Service {
             config,
@@ -130,7 +140,10 @@ impl Service {
             handler.abort();
         }
 
-        Arc::clone(&self.sandboxes).clean().await;
+        Arc::clone(&self.sandboxes)
+            .clean()
+            .await
+            .context("cleaning sandbox")?;
         Ok(())
     }
 
@@ -257,7 +270,10 @@ impl Service {
 
                 handlers.push(tokio::spawn(async move {
                     let result = enviroment.run().await.context("enviroment running")?;
-                    sender.send((test_number + 1, result.clone())).unwrap();
+                    sender
+                        .send((test_number + 1, result.clone()))
+                        .context("internal sending test result")
+                        .unwrap_or_else(|e| log::error!("{e}"));
                     if !result.verdict.is_success() {
                         let block = &mut blocked_groups.lock().await[group.id];
                         if let Some(id) = block {
