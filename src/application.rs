@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub struct App<
-    P: file::Provider,
+    P: file::providers::Provider,
     AS: Stream<AuthIncome, AuthOutgo>,
     MS: Stream<MasterIncome, MasterOutgo>,
 > {
@@ -28,7 +28,7 @@ pub struct App<
 }
 
 impl<
-    P: file::Provider + Sync + Send + 'static,
+    P: file::providers::Provider + Sync + Send + 'static,
     AS: Stream<AuthIncome, AuthOutgo> + Send + Sync + 'static,
     MS: Stream<MasterIncome, MasterOutgo> + Send + Sync + 'static,
 > App<P, AS, MS>

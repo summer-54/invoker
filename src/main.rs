@@ -38,7 +38,6 @@ struct Config {
     pub manager_host: Box<str>,
     pub config_dir: Box<Path>,
     pub work_dir: Box<Path>,
-    pub cache_dir: Box<Path>,
 
     pub cert_name: Box<str>,
     pub cert_path: Box<str>,
@@ -169,9 +168,10 @@ async fn main() -> Result<()> {
         communication
     };
     let cert = Cert::from_file(&*config.cert_path)?;
-    let inner_provider = file::stream_provider::StreamProvider::new(communication.load_stream);
+    let inner_provider = file::providers::stream::StreamProvider::new(communication.load_stream);
     let file_provider =
-        file::CachingProvider::init(config.cache_dir.clone(), inner_provider).await?;
+        file::providers::caching::CachingProvider::init(config.config_dir.clone(), inner_provider)
+            .await?;
 
     let app = App {
         master_stream: communication.master_stream,

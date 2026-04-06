@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::server::stream::{LoadIncome, LoadOutgo, Stream};
 
-use super::Id;
+use super::super::Id;
 
 pub struct StreamProvider<S: Stream<LoadIncome, LoadOutgo>> {
     stream: Mutex<S>,
