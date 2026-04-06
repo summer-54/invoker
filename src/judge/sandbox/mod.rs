@@ -4,6 +4,7 @@ use crate::prelude::*;
 
 pub use command::Command;
 
+use bytesize::ByteSize;
 use configo::Config as _;
 use resource_pool::ResourcePool;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use tokio::{
     fs::File,
     io::{AsyncRead, AsyncWriteExt},
     process::Command as TokioCommand,
+    time::Duration,
 };
 
 use std::{
@@ -25,7 +27,20 @@ pub enum MaybeLimited<T: Copy> {
     #[default]
     Unlimited,
 }
+
+impl<T: Copy> MaybeLimited<T> {
+    pub fn map<R: Copy>(self, op: impl FnOnce(T) -> R) -> MaybeLimited<R> {
+        if let Limited(x) = self {
+            Limited(op(x))
+        } else {
+            Unlimited
+        }
+    }
+}
+
 use MaybeLimited::{Limited, Unlimited};
+
+use super::serde_with::{de, ser};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IsolateConfig {
@@ -34,12 +49,35 @@ pub struct IsolateConfig {
     process_default_limit: MaybeLimited<usize>,
     open_files_default_limit: MaybeLimited<usize>,
 
-    memory_default_limit: MaybeLimited<u64>,
-    stack_default_limit: MaybeLimited<u64>,
+    #[serde(
+        serialize_with = "ser::mb_lim_bytesize_to_mb_lim_kib",
+        deserialize_with = "de::mb_lim_bytesize_from_mb_lim_kib"
+    )]
+    memory_default_limit: MaybeLimited<ByteSize>,
 
-    time_default_limit: MaybeLimited<f64>,
-    extra_time_default_limit: f64,
-    real_time_default_limit: MaybeLimited<f64>, // Real time limit (in seconds)
+    #[serde(
+        serialize_with = "ser::mb_lim_bytesize_to_mb_lim_kib",
+        deserialize_with = "de::mb_lim_bytesize_from_mb_lim_kib"
+    )]
+    stack_default_limit: MaybeLimited<ByteSize>,
+
+    #[serde(
+        serialize_with = "ser::mb_lim_duration_to_mb_lim_secs",
+        deserialize_with = "de::mb_lim_duration_from_mb_lim_secs"
+    )]
+    time_default_limit: MaybeLimited<Duration>,
+
+    #[serde(
+        serialize_with = "ser::duration_to_secs",
+        deserialize_with = "de::duration_from_secs"
+    )]
+    extra_time_default_limit: Duration,
+
+    #[serde(
+        serialize_with = "ser::mb_lim_duration_to_mb_lim_secs",
+        deserialize_with = "de::mb_lim_duration_from_mb_lim_secs"
+    )]
+    real_time_default_limit: MaybeLimited<Duration>, // Real time limit (in seconds)
 
     box_root: Box<Path>,
     lock_root: Box<Path>,
@@ -67,11 +105,11 @@ impl Default for IsolateConfig {
             process_default_limit: Limited(1),
             open_files_default_limit: Limited(2),
 
-            time_default_limit: Limited(10.),
-            extra_time_default_limit: 0.,
-            real_time_default_limit: Limited(10.),
+            time_default_limit: Limited(Duration::from_secs_f64(10.)),
+            extra_time_default_limit: Duration::from_secs_f64(0.),
+            real_time_default_limit: Limited(Duration::from_secs_f64(10.)),
 
-            memory_default_limit: Limited(1 << 20),
+            memory_default_limit: Limited(ByteSize::kib(1 << 20)),
             stack_default_limit: Unlimited,
         }
     }
@@ -298,33 +336,34 @@ impl Sandbox {
             .time_limit
             .unwrap_or(self.service.config.time_default_limit)
         {
-            command.arg(format!("--time={}", time_limit));
+            command.arg(format!("--time={}", time_limit.as_secs_f64()));
         }
 
         if let Limited(real_time_limit) = target
             .real_time_limit
             .unwrap_or(self.service.config.real_time_default_limit)
         {
-            command.arg(format!("--wall-time={}", real_time_limit));
+            command.arg(format!("--wall-time={}", real_time_limit.as_secs_f64()));
         }
 
         if let Limited(memory_limit) = target
             .memory_limit
             .unwrap_or(self.service.config.memory_default_limit)
         {
-            command.arg(format!("--mem={}", memory_limit));
+            command.arg(format!("--mem={}", memory_limit.as_kib()));
         }
         command.arg(format!(
             "--extra-time={}",
             target
                 .extra_time_limit
                 .unwrap_or(self.service.config.extra_time_default_limit)
+                .as_secs_f64()
         ));
         if let Limited(stack_limit) = target
             .stack_limit
             .unwrap_or(self.service.config.stack_default_limit)
         {
-            command.arg(format!("--stack={}", stack_limit));
+            command.arg(format!("--stack={}", stack_limit.as_kib()));
         }
         if let Limited(open_files_limit) = target
             .count_files_limit

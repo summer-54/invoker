@@ -1,5 +1,8 @@
 use crate::prelude::*;
 
+use bytesize::ByteSize;
+use tokio::time::Duration;
+
 use super::MaybeLimited;
 
 #[derive(Debug, Clone)]
@@ -7,11 +10,11 @@ pub struct Command {
     pub(super) program: Box<str>,
     pub(super) args: Vec<Box<str>>,
 
-    pub(super) time_limit: Option<MaybeLimited<f64>>, // Time limit (in seconds)
-    pub(super) memory_limit: Option<MaybeLimited<u64>>, // Memory limit (in KiB)
-    pub(super) real_time_limit: Option<MaybeLimited<f64>>, // Real time limit (in seconds)
-    pub(super) extra_time_limit: Option<f64>,         // Extra time limit (in seconds)
-    pub(super) stack_limit: Option<MaybeLimited<u64>>, // Stack limit (in KiB)
+    pub(super) time_limit: Option<MaybeLimited<Duration>>, // Time limit (in seconds)
+    pub(super) memory_limit: Option<MaybeLimited<ByteSize>>, // Memory limit (in KiB)
+    pub(super) real_time_limit: Option<MaybeLimited<Duration>>, // Real time limit (in seconds)
+    pub(super) extra_time_limit: Option<Duration>,         // Extra time limit (in seconds)
+    pub(super) stack_limit: Option<MaybeLimited<ByteSize>>, // Stack limit (in KiB)
     pub(super) count_files_limit: Option<MaybeLimited<usize>>,
     pub(super) count_process_limit: Option<MaybeLimited<usize>>,
     pub(super) use_env: bool,
@@ -73,24 +76,24 @@ impl Command {
         self
     }
 
-    pub fn time(&mut self, cfg: MaybeLimited<f64>) -> &mut Self {
+    pub fn time(&mut self, cfg: MaybeLimited<Duration>) -> &mut Self {
         self.time_limit = Some(cfg);
         self
     }
-    pub fn real_time(&mut self, cfg: MaybeLimited<f64>) -> &mut Self {
+    pub fn real_time(&mut self, cfg: MaybeLimited<Duration>) -> &mut Self {
         self.real_time_limit = Some(cfg);
         self
     }
-    pub fn extra_time(&mut self, cfg: f64) -> &mut Self {
+    pub fn extra_time(&mut self, cfg: Duration) -> &mut Self {
         self.extra_time_limit = Some(cfg);
         self
     }
 
-    pub fn memory(&mut self, cfg: MaybeLimited<u64>) -> &mut Self {
+    pub fn memory(&mut self, cfg: MaybeLimited<ByteSize>) -> &mut Self {
         self.memory_limit = Some(cfg);
         self
     }
-    pub fn stack(&mut self, cfg: MaybeLimited<u64>) -> &mut Self {
+    pub fn stack(&mut self, cfg: MaybeLimited<ByteSize>) -> &mut Self {
         self.stack_limit = Some(cfg);
         self
     }

@@ -127,13 +127,22 @@ pub mod submission {
         Interactive,
     }
 
+    pub use bytesize::ByteSize;
+    pub use tokio::time::Duration;
+
+    use super::super::serde_with::de;
+
     #[derive(Debug, Deserialize, Clone, Copy)]
     pub struct Limits {
-        pub time: f64,
-        pub real_time: f64,
+        #[serde(deserialize_with = "de::duration_from_secs")]
+        pub time: Duration,
+        #[serde(deserialize_with = "de::duration_from_secs")]
+        pub real_time: Duration,
 
-        pub memory: u64,
-        pub stack: Option<u64>,
+        #[serde(deserialize_with = "de::bytesize_from_kib")]
+        pub memory: ByteSize,
+        #[serde(deserialize_with = "de::option_bytesize_from_option_kib")]
+        pub stack: Option<ByteSize>,
     }
 
     #[derive(Debug, Deserialize, Clone)]
