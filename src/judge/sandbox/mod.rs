@@ -19,28 +19,11 @@ use std::{
     collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio, sync::Arc,
 };
 
-use crate::{LogState, Result, anyhow};
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
-pub enum MaybeLimited<T: Copy> {
-    Limited(T),
-    #[default]
-    Unlimited,
-}
-
-impl<T: Copy> MaybeLimited<T> {
-    pub fn map<R: Copy>(self, op: impl FnOnce(T) -> R) -> MaybeLimited<R> {
-        if let Limited(x) = self {
-            Limited(op(x))
-        } else {
-            Unlimited
-        }
-    }
-}
-
-use MaybeLimited::{Limited, Unlimited};
-
-use super::serde_with::{de, ser};
+use crate::{
+    LogState,
+    serde_with::{de, ser},
+    types::{Limited, Unlimited},
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IsolateConfig {

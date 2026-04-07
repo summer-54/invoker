@@ -2,7 +2,7 @@ use bytesize::ByteSize;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::time::Duration;
 
-use super::MaybeLimited;
+use crate::types::MaybeLimited;
 #[allow(dead_code)]
 pub mod ser {
     use super::*;

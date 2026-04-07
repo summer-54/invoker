@@ -1,1 +1,1 @@
-Make logger good
+Make LogState macrosed

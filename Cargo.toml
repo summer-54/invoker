@@ -41,6 +41,7 @@ nix = {version = "*", features = ["user"]}
 async-trait = {version = "*"}
 
 bytesize = {version = "*"}
+lru = {version = "*"}
 
 [features]
 default = ["mock"]

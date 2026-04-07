@@ -3,7 +3,7 @@ use crate::prelude::*;
 use bytesize::ByteSize;
 use tokio::time::Duration;
 
-use super::MaybeLimited;
+use crate::types::MaybeLimited;
 
 #[derive(Debug, Clone)]
 pub struct Command {

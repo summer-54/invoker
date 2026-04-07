@@ -10,7 +10,7 @@ use crate::{LogState, Result};
 use super::{
     api::{Lang, submission, test},
     consts::*,
-    sandbox::{self, Command, MaybeLimited::*, RunStatus},
+    sandbox::{self, Command, RunStatus},
 };
 
 const CHECKER_NAME: &str = "checker";

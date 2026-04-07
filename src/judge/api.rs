@@ -130,7 +130,7 @@ pub mod submission {
     pub use bytesize::ByteSize;
     pub use tokio::time::Duration;
 
-    use super::super::serde_with::de;
+    use crate::serde_with::de;
 
     #[derive(Debug, Deserialize, Clone, Copy)]
     pub struct Limits {

@@ -7,7 +7,9 @@ mod logger;
 #[cfg(feature = "mock")]
 mod mock;
 mod prelude;
+mod serde_with;
 mod server;
+mod types;
 
 use prelude::*;
 
@@ -171,7 +173,8 @@ async fn main() -> Result<()> {
     let inner_provider = file::providers::stream::StreamProvider::new(communication.load_stream);
     let file_provider =
         file::providers::caching::CachingProvider::init(config.config_dir.clone(), inner_provider)
-            .await?;
+            .await
+            .context("intializing caching provider")?;
 
     let app = App {
         master_stream: communication.master_stream,
