@@ -14,7 +14,7 @@ use super::{
     sandbox::{self, RunStatus},
 };
 
-pub struct Enviroment {
+pub struct Environment {
     sandbox: Arc<sandbox::Sandbox>,
     interactor_sandbox: Arc<sandbox::Sandbox>,
     limits: submission::Limits,
@@ -33,14 +33,14 @@ pub async fn prepare(
 
     test_id: usize,
     log_state: Arc<LogState>,
-) -> Result<Enviroment> {
+) -> Result<Environment> {
     let sandbox = Arc::new(Arc::clone(&sandboxes).initialize_sandbox().await?);
     let interactor_sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
     let log_state = log_state.push("solution_box_id", sandbox.id());
     let log_state = log_state.push("interactor_box_id", interactor_sandbox.id());
 
-    Ok(Enviroment {
+    Ok(Environment {
         sandbox,
         interactor_sandbox,
         lang,
@@ -52,7 +52,7 @@ pub async fn prepare(
 }
 
 #[async_trait]
-impl super::Enviroment for Enviroment {
+impl super::Environment for Environment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
         const TEST_DIR: &str = "test";
         const TEST_EXT: &str = "txt";

@@ -100,7 +100,7 @@ pub struct Service {
 }
 
 #[async_trait]
-pub trait Enviroment: Send {
+pub trait Environment: Send {
     async fn run(self: Box<Self>) -> Result<test::Result>;
 }
 
@@ -260,16 +260,16 @@ impl Service {
                 log::trace!("({log_state}) test started");
 
                 let task = Arc::clone(&task);
-                let enviroment = self
+                let environment = self
                     .prepare(task, lang, test_number, log_state)
                     .await
-                    .context("enviroment preparing")?;
+                    .context("environment preparing")?;
 
                 let blocked_groups = Arc::clone(&blocked_groups);
                 let sender = sender.clone();
 
                 handlers.push(tokio::spawn(async move {
-                    let result = enviroment.run().await.context("enviroment running")?;
+                    let result = environment.run().await.context("environment running")?;
                     sender
                         .send((test_number + 1, result.clone()))
                         .context("internal sending test result")
@@ -325,7 +325,7 @@ impl Service {
         lang: Lang,
         test_id: usize,
         log_state: Arc<LogState>,
-    ) -> Result<Box<dyn Enviroment>> {
+    ) -> Result<Box<dyn Environment>> {
         Ok(match task.ty {
             submission::Type::Standard => Box::from(
                 standard::prepare(
@@ -337,8 +337,8 @@ impl Service {
                     log_state,
                 )
                 .await
-                .context("standart preparing")?,
-            ) as Box<dyn Enviroment>,
+                .context("standard preparing")?,
+            ) as Box<dyn Environment>,
             submission::Type::Interactive => Box::from(
                 interactive::prepare(
                     Arc::clone(&self.sandboxes),
@@ -350,7 +350,7 @@ impl Service {
                 )
                 .await
                 .context("interactive preparing")?,
-            ) as Box<dyn Enviroment>,
+            ) as Box<dyn Environment>,
         })
     }
 }

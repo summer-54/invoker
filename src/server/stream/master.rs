@@ -179,7 +179,7 @@ impl super::Outgo for Outgo {
                 let mut body = RawMessage::new("TEST");
                 body.add_fields(vec![
                     (&"ID", &test_id),
-                    (&"VERDCIT", &verdict),
+                    (&"VERDICT", &verdict),
                     (&"TIME", &time),
                     (&"MEMORY", &memory),
                 ])

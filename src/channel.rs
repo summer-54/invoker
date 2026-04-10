@@ -11,7 +11,7 @@ impl Channel {
 
         let status = tokio::process::Command::new("mkfifo")
             .arg("-m")
-            .arg("777")
+            .arg("666")
             .arg(&*path)
             .status()
             .await
@@ -36,9 +36,7 @@ impl Drop for Channel {
     fn drop(&mut self) {
         let path = self.0.clone();
         let log_state = LogState::new().push("path", path.display().to_string());
-        tokio::spawn(async move {
-            log::trace!("{log_state} channel deleated");
-            tokio::fs::remove_file(path).await
-        });
+        std::fs::remove_file(path).unwrap_or_else(|e| log::error!("channel deleating error: {e}"));
+        log::trace!("{log_state} channel deleted");
     }
 }

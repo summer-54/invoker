@@ -38,11 +38,11 @@ impl<
         lang: Lang,
         solution: Box<[u8]>,
         package: Box<[u8]>,
-    ) -> JoinHandle<crate::Result<judge::api::submission::Result>> {
+    ) -> JoinHandle<Result<judge::api::submission::Result>> {
         use server::stream::MasterOutgo as Outgo;
         let self_clone = Arc::clone(self);
         let (sender, mut receiver) = unbounded_channel::<(usize, judge::api::test::Result)>();
-        let handler = tokio::spawn(async move {
+        let handler: JoinHandle<Result<()>> = tokio::spawn(async move {
             while let Some((id, test_result)) = receiver.recv().await {
                 let data = archive::pack(&[
                     ArchiveItem {
@@ -55,11 +55,7 @@ impl<
                     },
                 ])
                 .await
-                .context("archiving test verdict")
-                .unwrap_or_else(|e| {
-                    log::error!("{e}");
-                    vec![].into_boxed_slice()
-                });
+                .context("archiving test verdict")?;
                 self_clone
                     .master_stream
                     .send(Outgo::TestVerdict {
@@ -70,9 +66,9 @@ impl<
                         data,
                     })
                     .await
-                    .context("sending test verdict")
-                    .unwrap_or_else(|e| log::error!("{e}"));
+                    .context("sending test verdict")?;
             }
+            Ok(())
         });
         let self_clone = Arc::clone(self);
 
@@ -82,7 +78,7 @@ impl<
                 .judge(package, lang, solution, sender)
                 .await
                 .context("judging");
-            _ = handler.await;
+            _ = handler.await?;
             match &result {
                 Ok(full_verdict) => self_clone
                     .master_stream
@@ -98,10 +94,7 @@ impl<
                         judge::api::submission::Result::Te(msg) => FullVerdict::Te(msg.clone()),
                     }))
                     .await
-                    .context("sending full verdict")
-                    .unwrap_or_else(|e| {
-                        log::error!("sending message error: {e}");
-                    }),
+                    .context("sending full verdict")?,
                 Err(e) => {
                     log::error!("{e}");
                     self_clone
@@ -110,7 +103,7 @@ impl<
                             msg: e.to_string().into(),
                         })
                         .await
-                        .unwrap();
+                        .context("sending error message")?
                 }
             }
             result
@@ -158,7 +151,7 @@ impl<
                 Income::Close => break,
             }
         }
-        log::info!("master stream listner close");
+        log::info!("master stream listener close");
         Result::<()>::Ok(())
     }
 
