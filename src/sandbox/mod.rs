@@ -131,7 +131,7 @@ impl Service {
             return Err(anyhow!("isolate doesn't exist by path '{path}'"));
         }
 
-        let config = IsolateConfig::load(config_dir).await;
+        let config = IsolateConfig::load(config_dir).await?;
         config.write_config_file().await;
 
         Ok(Arc::new(Service {

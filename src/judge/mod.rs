@@ -145,7 +145,7 @@ impl Service {
             create_dir_all(CHANNEL_DIR).await.unwrap();
         }
         Service {
-            config: Config::load(config_dir).await,
+            config: Config::load(config_dir).await.unwrap(),
             work_dir,
             sandboxes,
             handler: Mutex::new(None),
