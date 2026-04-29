@@ -53,7 +53,7 @@ mod raw_msg {
 
                 match key {
                     "DATA" => break Some(buf.into()),
-                    "TPYE" => r#type = Some(value.into()),
+                    "TYPE" => r#type = Some(value.into()),
                     _ => fields.push((key.into(), value.into())),
                 }
             };
