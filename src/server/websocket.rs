@@ -233,7 +233,7 @@ impl outgo::Sender for Service {
                             let mut body = raw_msg::Body::new("TEST");
                             body.add_fields(vec![
                                 (&"ID", &test_id),
-                                (&"VERDCIT", &verdict),
+                                (&"VERDICT", &verdict),
                                 (&"TIME", &time),
                                 (&"MEMORY", &memory),
                             ])
