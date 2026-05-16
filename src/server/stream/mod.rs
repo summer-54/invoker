@@ -1,5 +1,4 @@
 pub mod auth;
-pub mod load;
 pub mod master;
 use crate::prelude::*;
 
@@ -10,9 +9,6 @@ pub type MasterOutgo = master::Outgo;
 
 pub type AuthIncome = auth::Income;
 pub type AuthOutgo = auth::Outgo;
-
-pub type LoadIncome = load::Income;
-pub type LoadOutgo = load::Outgo;
 
 #[allow(dead_code)]
 pub trait Income: Sized {

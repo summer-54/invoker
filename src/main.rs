@@ -1,7 +1,6 @@
 mod application;
 mod channel;
 mod consts;
-mod file;
 mod judge;
 mod logger;
 #[cfg(feature = "mock")]
@@ -22,9 +21,7 @@ use std::{path::Path, sync::Arc};
 
 use crate::{
     application::App,
-    server::stream::{
-        AuthIncome, AuthOutgo, LoadIncome, LoadOutgo, MasterIncome, MasterOutgo, Stream,
-    },
+    server::stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream},
 };
 
 #[cfg(not(feature = "mock"))]
@@ -55,14 +52,9 @@ impl Config {
     }
 }
 
-struct Communication<
-    A: Stream<AuthIncome, AuthOutgo>,
-    M: Stream<MasterIncome, MasterOutgo>,
-    L: Stream<LoadIncome, LoadOutgo>,
-> {
+struct Communication<A: Stream<AuthIncome, AuthOutgo>, M: Stream<MasterIncome, MasterOutgo>> {
     auth_stream: A,
     master_stream: M,
-    load_stream: L,
 }
 
 #[cfg(not(feature = "mock"))]
@@ -70,11 +62,7 @@ async fn init_websocket_communication(
     config: Arc<Config>,
 ) -> Result<(
     tokio::task::JoinHandle<Result<()>>,
-    Communication<
-        impl Stream<AuthIncome, AuthOutgo>,
-        impl Stream<MasterIncome, MasterOutgo>,
-        impl Stream<LoadIncome, LoadOutgo>,
-    >,
+    Communication<impl Stream<AuthIncome, AuthOutgo>, impl Stream<MasterIncome, MasterOutgo>>,
 )> {
     let channel = Arc::new(
         websocket::Channel::new(
@@ -87,7 +75,6 @@ async fn init_websocket_communication(
     let communication = Communication {
         auth_stream: channel.new_stream(consts::streams_names::AUTH).await,
         master_stream: channel.new_stream(consts::streams_names::MASTER).await,
-        load_stream: channel.new_stream(consts::streams_names::LOAD).await,
     };
 
     let handler = tokio::spawn(channel.run());
@@ -106,7 +93,7 @@ async fn init_mock_communication(
         impl Stream<LoadIncome, LoadOutgo>,
     >,
 ) {
-    use crate::mock::{AuthStream, LoadStream, MasterStream};
+    use crate::mock::{AuthStream, MasterStream};
 
     log::info!("{} communication initialized", "mock".bold());
     let (sender, master_stream) = MasterStream::new();
@@ -152,36 +139,21 @@ async fn main() -> Result<()> {
             };
             let lang = judge::api::Lang::try_from(&*lang)?;
 
-            let Some(package_id) = args.next() else {
-                bail!("package id was not founded")
-            };
-            let package_id = package_id.parse::<file::Id>()?;
-
             let data = tokio::fs::read(&name)
                 .await
                 .context(format!("reading file '{name}'"))?
                 .into_boxed_slice();
-            master_sender.send(MasterIncome::Run {
-                package_id,
-                lang,
-                data,
-            })?;
+            master_sender.send(MasterIncome::Run { lang, data })?;
         }
         communication
     };
     let cert = Cert::from_file(&*config.cert_path)?;
-    let inner_provider = file::providers::stream::StreamProvider::new(communication.load_stream);
-    let file_provider =
-        file::providers::caching::CachingProvider::init(config.config_dir.clone(), inner_provider)
-            .await
-            .context("intializing caching provider")?;
 
     let app = App {
         master_stream: communication.master_stream,
         auth_stream: communication.auth_stream,
         judge_service: Arc::new(judge::Service::new(&config.config_dir, judger_work_dir).await?),
         cert: Arc::new(cert),
-        file_provider,
     };
 
     Stream::<MasterIncome, MasterOutgo>::send(

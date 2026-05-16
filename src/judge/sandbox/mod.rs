@@ -77,7 +77,7 @@ const ISOLATE_CONFIG_PATH: &str = "/usr/local/etc/isolate";
 impl Default for IsolateConfig {
     fn default() -> Self {
         Self {
-            sandboxes_count: 1000,
+            sandboxes_count: 3,
             box_root: Box::from(Path::new("/.invoker/isolate")),
             lock_root: Box::from(Path::new("/run/isolate/locks")),
             cg_root: Box::from(Path::new("/run/isolate/cgroup")),

@@ -1,7 +1,6 @@
 use crate::prelude::*;
 
 use crate::{
-    file::Id,
     judge::api::{Lang, test::Verdict},
     logger::short_slice,
 };
@@ -20,11 +19,7 @@ pub enum FullVerdict {
 }
 #[allow(dead_code)]
 pub enum Income {
-    Run {
-        package_id: Id,
-        lang: Lang,
-        data: Box<[u8]>,
-    },
+    Run { lang: Lang, data: Box<[u8]> },
     Stop,
     Close,
 }
@@ -32,13 +27,8 @@ pub enum Income {
 impl std::fmt::Debug for Income {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Run {
-                lang,
-                package_id,
-                data,
-            } => f
+            Self::Run { lang, data } => f
                 .debug_struct("Start")
-                .field("package_id", package_id)
                 .field("lang", lang)
                 .field("data", &Box::<[u8]>::from(short_slice(data)))
                 .finish(),
@@ -58,11 +48,8 @@ impl super::Income for Income {
                 let Some(lang) = msg.field("LANG") else {
                     bail!("{} field not found", "LANG".bold());
                 };
-                let Some(package_id) = msg.field("PACKAGE") else {
-                    bail!("{} field not found", "PACKAGE".bold());
-                };
+
                 Self::Run {
-                    package_id: package_id.parse().context("parsing package id")?,
                     lang: Lang::try_from(lang).context("parsing lang")?,
                     data: Box::from(data),
                 }

@@ -211,14 +211,12 @@ impl Service {
         self: Arc<Self>,
         mut package: archive::Archive<R>,
         lang: Lang,
-        solution: Box<[u8]>,
         sender: UnboundedSender<(usize, test::Result)>,
     ) -> Result<submission::Result> {
         let permit = self.semaphore.try_acquire()?;
         log::info!("testing started");
 
         package.unpack(&*self.work_dir).await?;
-        tokio::fs::write(Path::new(&*self.work_dir).join(SOLUTION_NAME), solution).await?;
 
         let mut text = String::new();
         File::open(self.work_dir.join(PACKAGE_CONFIG_NAME))
@@ -248,15 +246,18 @@ impl Service {
                 log_state = log_state.push("test", test_number);
                 log::trace!("({log_state}) looking on test");
 
-                if blocked_groups.lock().await[group.id].is_some() {
-                    continue;
-                }
-                for depend in &group.depends {
-                    if blocked_groups.lock().await[*depend].is_some() {
-                        continue 'test;
+                {
+                    let blocked_groups = &mut blocked_groups.lock().await;
+                    if blocked_groups[group.id].is_some() {
+                        break;
+                    }
+                    for depend in &group.depends {
+                        if let Some(blocking_test_id) = blocked_groups[*depend] {
+                            blocked_groups[group.id] = Some(blocking_test_id);
+                            break 'test;
+                        }
                     }
                 }
-
                 log::trace!("({log_state}) test started");
 
                 let task = Arc::clone(&task);

@@ -144,7 +144,7 @@ TYPE RUN
 PACKAGE <id>
 LANG G++ / PYTHON3
 DATA
-<binary data: source code>
+<binary data: problem package>
 ```
 
 ##### Stop Task
@@ -270,29 +270,6 @@ auth
 TYPE PROOF
 DATA
 <bytes: proof>
-```
-
----
-
-### Load Stream
-
-#### Icoming Messages
-
-##### Package
-
-```
-load
-TYPE PACKAGE
-DATA
-<tar: package>
-```
-
-#### Outgoing Messages
-
-##### Load
-
-```
-
 ```
 
 ---

@@ -7,7 +7,7 @@ use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 use std::sync::Arc;
 
 use crate::{
-    Result, file,
+    Result,
     judge::{self, api::Lang},
     server::{
         self,
@@ -15,28 +15,21 @@ use crate::{
     },
 };
 
-pub struct App<
-    P: file::providers::Provider,
-    AS: Stream<AuthIncome, AuthOutgo>,
-    MS: Stream<MasterIncome, MasterOutgo>,
-> {
+pub struct App<AS: Stream<AuthIncome, AuthOutgo>, MS: Stream<MasterIncome, MasterOutgo>> {
     pub auth_stream: AS,
     pub master_stream: MS,
     pub judge_service: Arc<judge::Service>,
     pub cert: Arc<Cert>,
-    pub file_provider: P,
 }
 
 impl<
-    P: file::providers::Provider + Sync + Send + 'static,
     AS: Stream<AuthIncome, AuthOutgo> + Send + Sync + 'static,
     MS: Stream<MasterIncome, MasterOutgo> + Send + Sync + 'static,
-> App<P, AS, MS>
+> App<AS, MS>
 {
     pub fn start_judgment(
         self: &Arc<Self>,
         lang: Lang,
-        solution: Box<[u8]>,
         package: Box<[u8]>,
     ) -> JoinHandle<Result<judge::api::submission::Result>> {
         use server::stream::MasterOutgo as Outgo;
@@ -75,7 +68,7 @@ impl<
         tokio::spawn(async move {
             let package = archive::Archive::new(&*package);
             let result = Arc::clone(&self_clone.judge_service)
-                .judge(package, lang, solution, sender)
+                .judge(package, lang, sender)
                 .await
                 .context("judging");
             _ = handler.await?;
@@ -131,18 +124,7 @@ impl<
                 .context("reading master message")?;
             log::trace!("master stream receive message {msg:#?}");
             match msg {
-                Income::Run {
-                    package_id,
-                    lang,
-                    data,
-                } => {
-                    let package = self
-                        .file_provider
-                        .get(package_id)
-                        .await
-                        .context("file provider get package")?;
-                    _ = self.start_judgment(lang, data, package)
-                }
+                Income::Run { lang, data } => _ = self.start_judgment(lang, data),
                 Income::Stop => self
                     .judge_service
                     .cancel_all_tests()
