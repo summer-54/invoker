@@ -255,13 +255,16 @@ impl Service {
                 let mut log_state = LogState::new();
                 log_state = log_state.push("test", &*format!("{test_number}"));
                 log::trace!("({log_state}) looking on test");
-
-                if blocked_groups.lock().await[group.id].is_some() {
-                    continue;
-                }
-                for depend in &group.depends {
-                    if blocked_groups.lock().await[*depend].is_some() {
-                        continue 'test;
+                {
+                    let blocked_groups = &mut blocked_groups.lock().await;
+                    if blocked_groups[group.id].is_some() {
+                        break;
+                    }
+                    for depend in &group.depends {
+                        if let Some(blocking_test_id) = blocked_groups[*depend] {
+                            blocked_groups[group.id] = Some(blocking_test_id);
+                            break 'test;
+                        }
                     }
                 }
 
