@@ -1,11 +1,15 @@
 pub mod api;
+mod sandbox;
 // mod double_run;
+mod consts;
 mod interactive;
 mod standard;
 
 use crate::prelude::*;
 
 use async_trait::async_trait;
+use configo::Config as _;
+use consts::*;
 use serde::{Deserialize, Serialize};
 use tar_archive_rs as archive;
 use tokio::{
@@ -15,70 +19,50 @@ use tokio::{
     task::JoinHandle,
 };
 
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, sync::Arc};
-
-use crate::{
-    LogState, Result,
-    sandbox::{self, Command, MaybeLimited},
+use std::{
+    collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, sync::Arc,
 };
-use configo::Config as _;
+
+use crate::{LogState, Result, types::MaybeLimited};
 
 use api::{
+    Lang,
     submission::{self, Task},
     test,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Lang {
-    #[serde(rename = "g++")]
-    Gpp,
-    #[serde(rename = "python3")]
-    Python,
-}
-
-impl Lang {
-    pub fn command_to_run(&self, name: &str) -> Command {
-        match self {
-            Self::Gpp => Command::new(format!("./{name}")),
-            Self::Python => {
-                let mut cmd = Command::new("/usr/bin/python3");
-                cmd.arg(name);
-                cmd
-            }
-        }
-    }
-}
+use sandbox::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
+    path_to_isolate: Box<Path>,
     compilation_commands: HashMap<Lang, Box<[Box<str>]>>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            path_to_isolate: Path::new("/usr/bin/isolate").into(),
             compilation_commands: vec![
                 (
                     Lang::Gpp,
                     vec![
-                        "/usr/bin/g++",
+                        GPP_BIN_PATH,
                         "$SOURCE",
                         "-o",
                         "$OUTPUT",
                         "-O2",
                         "-Wall",
                         "-lm",
-                    ]
-                    .into(),
+                    ],
                 ),
                 (
                     Lang::Python,
-                    vec!["/usr/bin/cp", "--update=none", "$SOURCE", "$OUTPUT"],
+                    vec![COPY_BIN_PATH, "--update=none", "$SOURCE", "$OUTPUT"],
                 ),
             ]
             .into_iter()
-            .map(|(k, v)| (k, v.into_iter().map(|s| s.into()).collect()).into())
+            .map(|(k, v)| (k, v.into_iter().map(|s| s.into()).collect()))
             .collect(),
         }
     }
@@ -108,49 +92,46 @@ impl Config {
 
 pub struct Service {
     config: Config,
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
 
     semaphore: Semaphore,
     sandboxes: Arc<sandbox::Service>,
     handler: Mutex<Option<JoinHandle<()>>>,
 }
 
-const CHANNEL_DIR: &str = "/.invoker";
-const SOLUTION_NAME: &str = "solution";
-const SOLUTION_EXT: Option<&str> = Some("out");
-
-pub fn path_from(dir: &str, name: &str, ext: Option<&str>) -> Box<str> {
-    format!(
-        "{dir}/{name}{}",
-        ext.map(|s| [".", s].concat()).unwrap_or("".to_string())
-    )
-    .into_boxed_str()
-}
-
 #[async_trait]
-pub trait Enviroment: Send {
+pub trait Environment: Send {
     async fn run(self: Box<Self>) -> Result<test::Result>;
 }
 
 impl Service {
-    pub async fn new(
-        config_dir: &str,
-        sandboxes: Arc<sandbox::Service>,
-        work_dir: Box<str>,
-    ) -> Service {
-        if !tokio::fs::try_exists(&*work_dir).await.unwrap() {
-            create_dir(&*work_dir).await.unwrap();
+    pub async fn new(config_dir: impl AsRef<Path>, work_dir: impl AsRef<Path>) -> Result<Service> {
+        let config = Config::load(&config_dir)
+            .await
+            .context("loading judge config")?;
+        let sandboxes = sandbox::Service::new(config_dir, config.path_to_isolate.clone()).await?;
+
+        if !tokio::fs::try_exists(&work_dir)
+            .await
+            .context("checking work dir")?
+        {
+            create_dir(&work_dir).await.context("creating work dir")?;
         }
-        if !tokio::fs::try_exists(CHANNEL_DIR).await.unwrap() {
-            create_dir_all(CHANNEL_DIR).await.unwrap();
+        if !tokio::fs::try_exists(consts::CHANNEL_DIR)
+            .await
+            .context("checking channel dir")?
+        {
+            create_dir_all(consts::CHANNEL_DIR)
+                .await
+                .context("creating channel dir")?;
         }
-        Service {
-            config: Config::load(config_dir).await.unwrap(),
-            work_dir,
+        Ok(Service {
+            config,
+            work_dir: work_dir.as_ref().into(),
             sandboxes,
             handler: Mutex::new(None),
             semaphore: Semaphore::new(1),
-        }
+        })
     }
 
     pub async fn cancel_all_tests(&self) -> Result<()> {
@@ -159,7 +140,10 @@ impl Service {
             handler.abort();
         }
 
-        Arc::clone(&self.sandboxes).clean().await;
+        Arc::clone(&self.sandboxes)
+            .clean()
+            .await
+            .context("cleaning sandbox")?;
         Ok(())
     }
 
@@ -170,24 +154,25 @@ impl Service {
             .context("sandbox initializing")?;
 
         let mut log_state = LogState::new();
-        log_state = log_state.push("box", &*format!("{}", sandbox.id()));
+        log_state = log_state.push("box", sandbox.id());
 
         sandbox
             .write_into_box(
-                &mut File::open(format!("{}/solution", &*self.work_dir)).await?,
-                "solution.cpp",
+                &mut File::open(&*self.work_dir.join(SOLUTION_NAME)).await?,
+                "solution",
             )
             .await?;
 
-        let compile_errors_path = "compile_errors";
+        const COMPILE_ERRORS_PATH: &str = "compile_errors";
+
         let mut compilation_command =
             self.config
-                .compilation_command(lang, "solution.cpp", "solution.out")?;
+                .compilation_command(lang, SOLUTION_NAME, SOLUTION_EXEC_NAME)?;
         compilation_command
             .count_files(MaybeLimited::Unlimited)
             .count_process(MaybeLimited::Unlimited)
             .use_env()
-            .stderr(compile_errors_path);
+            .stderr(COMPILE_ERRORS_PATH);
 
         let compile_result = sandbox.run(&compilation_command).await?;
 
@@ -196,14 +181,14 @@ impl Service {
         match compile_result.status {
             sandbox::RunStatus::Tl | sandbox::RunStatus::Ml | sandbox::RunStatus::Sg(_) => {
                 let mut message = String::new();
-                if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
+                if let Ok(mut r) = sandbox.read_from_box(COMPILE_ERRORS_PATH).await {
                     r.read_to_string(&mut message).await?;
                 }
                 return Ok(Some(submission::Result::Te(message.into_boxed_str())));
             }
             sandbox::RunStatus::Re(_) => {
                 let mut message = String::new();
-                if let Ok(mut r) = sandbox.read_from_box(compile_errors_path).await {
+                if let Ok(mut r) = sandbox.read_from_box(COMPILE_ERRORS_PATH).await {
                     r.read_to_string(&mut message).await?;
                 }
 
@@ -212,8 +197,12 @@ impl Service {
             _ => (),
         };
 
-        let mut file = tokio::fs::File::create(format!("{}/solution.out", self.work_dir)).await?;
-        tokio::io::copy(&mut sandbox.read_from_box("solution.out").await?, &mut file).await?;
+        let mut file = tokio::fs::File::create(self.work_dir.join(SOLUTION_EXEC_NAME)).await?;
+        tokio::io::copy(
+            &mut sandbox.read_from_box(SOLUTION_EXEC_NAME).await?,
+            &mut file,
+        )
+        .await?;
         file.set_permissions(Permissions::from_mode(0o777)).await?;
         Ok(None)
     }
@@ -221,22 +210,23 @@ impl Service {
     pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
         self: Arc<Self>,
         mut package: archive::Archive<R>,
+        lang: Lang,
         sender: UnboundedSender<(usize, test::Result)>,
     ) -> Result<submission::Result> {
         let permit = self.semaphore.try_acquire()?;
         log::info!("testing started");
+
         package.unpack(&*self.work_dir).await?;
 
         let mut text = String::new();
-        File::open(&format!("{}/config.yaml", &self.work_dir))
+        File::open(self.work_dir.join(PACKAGE_CONFIG_NAME))
             .await?
             .read_to_string(&mut text)
             .await?;
 
-        log::trace!("config.yaml:\n{text}");
+        log::trace!("{PACKAGE_CONFIG_NAME}:\n{text}");
 
         let task: Arc<Task> = Arc::new(serde_yml::from_str(text.as_str())?);
-        let lang = task.lang;
 
         if let Some(verdict) = self
             .compile_solution(lang)
@@ -253,8 +243,9 @@ impl Service {
         for group in task.groups.clone() {
             'test: for test_number in (group.range.0 - 1)..group.range.1 {
                 let mut log_state = LogState::new();
-                log_state = log_state.push("test", &*format!("{test_number}"));
+                log_state = log_state.push("test", test_number);
                 log::trace!("({log_state}) looking on test");
+
                 {
                     let blocked_groups = &mut blocked_groups.lock().await;
                     if blocked_groups[group.id].is_some() {
@@ -267,21 +258,23 @@ impl Service {
                         }
                     }
                 }
-
                 log::trace!("({log_state}) test started");
 
                 let task = Arc::clone(&task);
-                let enviroment = self
-                    .prepare(task, test_number, log_state)
+                let environment = self
+                    .prepare(task, lang, test_number, log_state)
                     .await
-                    .context("enviroment preparing")?;
+                    .context("environment preparing")?;
 
                 let blocked_groups = Arc::clone(&blocked_groups);
                 let sender = sender.clone();
 
                 handlers.push(tokio::spawn(async move {
-                    let result = enviroment.run().await.context("enviroment running")?;
-                    sender.send((test_number + 1, result.clone())).unwrap();
+                    let result = environment.run().await.context("environment running")?;
+                    sender
+                        .send((test_number + 1, result.clone()))
+                        .context("internal sending test result")
+                        .unwrap_or_else(|e| log::error!("{e}"));
                     if !result.verdict.is_success() {
                         let block = &mut blocked_groups.lock().await[group.id];
                         if let Some(id) = block {
@@ -303,7 +296,6 @@ impl Service {
         let blocked_groups = blocked_groups.lock().await;
 
         let groups_score: Box<[usize]> = (0..task.groups.len())
-            .into_iter()
             .map(|i| {
                 if blocked_groups[i].is_none() {
                     task.groups[i].cost
@@ -331,26 +323,27 @@ impl Service {
     async fn prepare(
         &self,
         task: Arc<Task>,
+        lang: Lang,
         test_id: usize,
         log_state: Arc<LogState>,
-    ) -> Result<Box<dyn Enviroment>> {
-        Ok(match task.r#type {
+    ) -> Result<Box<dyn Environment>> {
+        Ok(match task.ty {
             submission::Type::Standard => Box::from(
                 standard::prepare(
                     Arc::clone(&self.sandboxes),
-                    task.lang,
+                    lang,
                     task.limits,
                     self.work_dir.clone(),
                     test_id,
                     log_state,
                 )
                 .await
-                .context("standart preparing")?,
-            ) as Box<dyn Enviroment>,
+                .context("standard preparing")?,
+            ) as Box<dyn Environment>,
             submission::Type::Interactive => Box::from(
                 interactive::prepare(
                     Arc::clone(&self.sandboxes),
-                    task.lang,
+                    lang,
                     task.limits,
                     self.work_dir.clone(),
                     test_id,
@@ -358,7 +351,7 @@ impl Service {
                 )
                 .await
                 .context("interactive preparing")?,
-            ) as Box<dyn Enviroment>,
+            ) as Box<dyn Environment>,
         })
     }
 }

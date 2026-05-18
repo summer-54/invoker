@@ -23,7 +23,7 @@ const INPUT_EXT: Option<&str> = Some("txt");
 const CORRECT_DIR: &str = "correct";
 const CORRECT_EXT: Option<&str> = Some("txt");
 
-pub struct Enviroment {
+pub struct Environment {
     sandbox: Arc<sandbox::Sandbox>,
     limits: submission::Limits,
     lang: Lang,
@@ -41,12 +41,12 @@ pub async fn prepare(
 
     test_id: usize,
     log_state: Arc<LogState>,
-) -> Result<Enviroment> {
+) -> Result<Environment> {
     let sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
     let log_state = log_state.push("box_id", &*format!("{}", sandbox.id()));
 
-    Ok(Enviroment {
+    Ok(Environment {
         sandbox,
         lang,
         limits,
@@ -56,7 +56,7 @@ pub async fn prepare(
     })
 }
 
-impl super::Enviroment for Enviroment {
+impl super::Environment for Environment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
         let log_state = self.log_state.push("task type", "STANDARD");
         log::trace!("({log_state}) testing STARTED");

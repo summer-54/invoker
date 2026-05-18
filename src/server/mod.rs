@@ -1,153 +1,150 @@
+pub mod stream;
 #[cfg(not(feature = "mock"))]
 pub mod websocket;
 
-use crate::VISIBLE_DATA_LEN;
 use crate::prelude::*;
 
+use std::{collections::HashMap, sync::Arc};
+
+use crate::logger::short_slice;
+
+#[derive(Debug)]
 #[allow(dead_code)]
-pub mod income {
-    use invoker_auth::Challenge;
-    use std::future;
+pub struct MappedRawMessage {
+    map: HashMap<Arc<str>, usize>,
+    msg: RawMessage,
+}
 
-    use crate::short_slice_u8;
-
-    use super::Result;
-
-    pub enum Msg {
-        Challenge(Challenge),
-        AuthVerdict(bool),
-        Start { data: Box<[u8]> },
-        Stop,
-        Close,
+pub struct RawMessage {
+    pub(self) ty: Box<str>,
+    pub(self) fields: Vec<(Arc<str>, Box<str>)>,
+    pub(self) data: Option<Box<[u8]>>,
+}
+impl std::fmt::Debug for RawMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct(&self.ty);
+        s.field("fields", &self.fields);
+        if let Some(data) = &self.data {
+            s.field("data", &Box::<[u8]>::from(short_slice(data)));
+        }
+        s.finish()
     }
+}
+impl TryFrom<&[u8]> for RawMessage {
+    type Error = Error;
 
-    impl std::fmt::Debug for Msg {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::Challenge(challenge) => f
-                    .debug_struct("Challenge")
-                    .field("data", &Box::<[u8]>::from(short_slice_u8(&*challenge)))
-                    .finish(),
-                Self::Start { data } => f
-                    .debug_struct("Start")
-                    .field("data", &Box::<[u8]>::from(short_slice_u8(&data)))
-                    .finish(),
-                Self::Stop => write!(f, "Stop"),
-                Self::Close => write!(f, "Close"),
-                Self::AuthVerdict(verdict) => {
-                    write!(f, "{}", if *verdict { "Approved" } else { "Denied" })
-                }
+    fn try_from(mut buf: &[u8]) -> Result<Self> {
+        let mut fields = Vec::<(Arc<str>, Box<str>)>::new();
+        let mut ty = Option::<Box<str>>::None;
+
+        let data = loop {
+            let Some(endl_pos) = buf.iter().position(|&b| b == b'\n') else {
+                break None;
+            };
+
+            let (line, other) = buf.split_at(endl_pos + 1);
+            buf = other;
+
+            let line = String::from_utf8_lossy(line);
+            let (key, value) = line.split_once(' ').unwrap_or((&*line, ""));
+            let key = key.trim();
+            let value = value.trim();
+
+            match key {
+                "DATA" => break Some(buf.into()),
+                "TYPE" => ty = Some(value.into()),
+                _ => fields.push((key.into(), value.into())),
             }
+        };
+
+        let Some(ty) = ty else {
+            bail!("field '{}' not found", "TYPE".bold())
+        };
+
+        Ok(Self { ty, fields, data })
+    }
+}
+
+#[allow(dead_code)]
+impl RawMessage {
+    pub fn new(ty: impl ToString) -> Self {
+        Self {
+            ty: ty.to_string().into_boxed_str(),
+            fields: vec![],
+            data: None,
         }
     }
-
-    pub trait Receiver: Send + Sync {
-        fn recv(&self) -> impl Future<Output = Result<Msg>> + Send;
+    pub fn into_bytes(self) -> impl Iterator<Item = u8> {
+        format!("TYPE {}\n", self.ty)
+            .into_bytes()
+            .into_iter()
+            .chain(
+                self.fields
+                    .into_iter()
+                    .flat_map(|(k, v)| format!("{k} {v}\n").into_bytes()),
+            )
+            .chain(
+                self.data
+                    .into_iter()
+                    .flat_map(|data| "DATA\n".bytes().chain(data)),
+            )
     }
 
-    pub struct MockReceiver;
-    impl Receiver for MockReceiver {
-        fn recv(&self) -> impl Future<Output = Result<Msg>> + Send {
-            future::pending()
+    pub fn add_field(&mut self, name: &dyn ToString, value: &dyn ToString) -> &mut Self {
+        self.fields
+            .push((name.to_string().into(), value.to_string().into()));
+        self
+    }
+    pub fn add_fields(&mut self, fields: Vec<(&dyn ToString, &dyn ToString)>) -> &mut Self {
+        for (name, value) in fields {
+            self.add_field(name, value);
+        }
+        self
+    }
+    pub fn set_data(&mut self, data: Box<[u8]>) -> &mut Self {
+        self.data = Some(data);
+        self
+    }
+    pub fn into_mapped(self) -> MappedRawMessage {
+        MappedRawMessage {
+            map: self
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, (k, _))| (Arc::clone(k), i))
+                .collect(),
+            msg: self,
         }
     }
 }
+
+impl From<RawMessage> for MappedRawMessage {
+    fn from(value: RawMessage) -> MappedRawMessage {
+        value.into_mapped()
+    }
+}
+
+impl TryFrom<&[u8]> for MappedRawMessage {
+    type Error = Error;
+    fn try_from(value: &[u8]) -> Result<Self> {
+        Ok(Self::from(RawMessage::try_from(value)?))
+    }
+}
 #[allow(dead_code)]
-pub mod outgo {
-    use colored::Colorize;
-    use invoker_auth::Solution;
-
-    use super::{Result, VISIBLE_DATA_LEN};
-    use crate::judge::api::test::Verdict;
-
-    #[derive(Debug)]
-    pub enum FullVerdict {
-        Ok {
-            score: usize,
-            groups_score: Box<[usize]>,
-        },
-        Ce(Box<str>),
-        Te(Box<str>),
+impl MappedRawMessage {
+    pub fn field(&self, name: &str) -> Option<&str> {
+        Some(&*self.msg.fields[*self.map.get(name)?].1)
     }
-
-    // #[derive(Debug)]
-    pub enum Msg {
-        Token {
-            token: uuid::Uuid,
-            name: Box<str>,
-        },
-        ChallengeSolution(Solution),
-        FullVerdict(FullVerdict),
-        TestVerdict {
-            test_id: usize,
-            verdict: Verdict,
-            time: f64,
-            memory: u64,
-            data: Box<[u8]>,
-        },
-        Exited {
-            code: u8,
-            data: Box<str>,
-        },
-        Error {
-            msg: Box<str>,
-        },
-        OpError {
-            msg: Box<str>,
-        },
+    pub fn field_eq(&self, name: &str, value: &str) -> bool {
+        let Some(field) = self.field(name) else {
+            return false;
+        };
+        *field == *value
     }
-
-    impl std::fmt::Debug for Msg {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::Token { token, name } => f
-                    .debug_struct("Token")
-                    .field("token", token)
-                    .field("name", name)
-                    .finish(),
-                Self::ChallengeSolution(data) => f
-                    .debug_struct("ChallengeSolution")
-                    .field("data", &Box::<[u8]>::from(&data[..VISIBLE_DATA_LEN]))
-                    .finish(),
-                Self::FullVerdict(verdict) => f.debug_tuple("FullVerdict").field(verdict).finish(),
-                Self::TestVerdict {
-                    test_id,
-                    verdict,
-                    time,
-                    memory,
-                    data,
-                } => f
-                    .debug_struct("TestVerdict")
-                    .field("test_id", test_id)
-                    .field("verdict", verdict)
-                    .field("time", time)
-                    .field("memory", memory)
-                    .field("data", &Box::<[u8]>::from(&data[..VISIBLE_DATA_LEN]))
-                    .finish(),
-                Self::Exited { code, data } => f
-                    .debug_struct("Exited")
-                    .field("code", code)
-                    .field("data", data)
-                    .finish(),
-                Self::Error { msg } => f.debug_struct("Error").field("msg", msg).finish(),
-                Self::OpError { msg } => f.debug_struct("OpError").field("msg", msg).finish(),
-            }
-        }
+    pub fn ty(&self) -> &str {
+        &self.msg.ty
     }
-
-    pub trait Sender: Send + Sync {
-        fn send(&self, msg: Msg) -> impl Future<Output = Result<()>> + Send;
-    }
-
-    pub struct MockSender;
-    impl Sender for MockSender {
-        fn send(&self, msg: Msg) -> impl Future<Output = Result<()>> + Send {
-            println!(
-                "{}\n{}",
-                "---+++==< MESSAGE SENDED >==+++---".magenta(),
-                format!("{msg:#?}").bright_magenta(),
-            );
-            futures::future::ready(Ok(()))
-        }
+    pub fn data(&self) -> Option<&[u8]> {
+        self.msg.data.as_deref()
     }
 }

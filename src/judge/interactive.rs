@@ -1,39 +1,26 @@
-use std::sync::Arc;
+use crate::prelude::*;
 
-use crate::channel::Channel;
+use std::{path::Path, sync::Arc};
+
+use anyhow::Context;
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _};
 
+use crate::{LogState, channel::Channel};
+
 use super::{
-    CHANNEL_DIR, Lang, SOLUTION_EXT, SOLUTION_NAME,
-    api::{submission, test},
-    path_from,
-};
-use crate::{
-    LogState, Result,
-    sandbox::{self, MaybeLimited, RunStatus},
+    api::{Lang, submission, test},
+    consts::*,
+    sandbox::{self, RunStatus},
 };
 
-const TEST_DIR: &str = "test";
-const TEST_EXT: Option<&str> = Some("txt");
-
-const INTERACTOR_NAME: &str = "interactor";
-const INTERACTOR_EXT: Option<&str> = Some("out");
-
-const TARGET_TEST_PATH: &str = "test.txt";
-const TARGET_INTERACTOR_OUTPUT_PATH: &str = "interactor_out.txt";
-const TARGET_INTERACTOR_ERROR_PATH: &str = "interactor_err.txt";
-
-const TARGET_INTERACTOR_PATH: &str = "interactor.out";
-const TARGET_SOLUTION_PATH: &str = "solution.out";
-
-pub struct Enviroment {
+pub struct Environment {
     sandbox: Arc<sandbox::Sandbox>,
     interactor_sandbox: Arc<sandbox::Sandbox>,
     limits: submission::Limits,
     lang: Lang,
 
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
     test_id: usize,
     log_state: Arc<LogState>,
 }
@@ -42,21 +29,18 @@ pub async fn prepare(
     sandboxes: Arc<sandbox::Service>,
     lang: Lang,
     limits: submission::Limits,
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
 
     test_id: usize,
     log_state: Arc<LogState>,
-) -> Result<Enviroment> {
+) -> Result<Environment> {
     let sandbox = Arc::new(Arc::clone(&sandboxes).initialize_sandbox().await?);
     let interactor_sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
-    let log_state = log_state.push("solution_box_id", &*format!("{}", sandbox.id()));
-    let log_state = log_state.push(
-        "interactor_box_id",
-        &*format!("{}", interactor_sandbox.id()),
-    );
+    let log_state = log_state.push("solution_box_id", sandbox.id());
+    let log_state = log_state.push("interactor_box_id", interactor_sandbox.id());
 
-    Ok(Enviroment {
+    Ok(Environment {
         sandbox,
         interactor_sandbox,
         lang,
@@ -68,54 +52,89 @@ pub async fn prepare(
 }
 
 #[async_trait]
-impl super::Enviroment for Enviroment {
+impl super::Environment for Environment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
+        const TEST_DIR: &str = "test";
+        const TEST_EXT: &str = "txt";
+
+        const INTERACTOR_NAME: &str = "interactor";
+        const INTERACTOR_EXT: &str = "out";
+
+        const TARGET_TEST_PATH: &str = "test.txt";
+        const TARGET_INTERACTOR_OUTPUT_PATH: &str = "interactor_out.txt";
+        const TARGET_INTERACTOR_ERROR_PATH: &str = "interactor_err.txt";
+
+        const TARGET_INTERACTOR_PATH: &str = "interactor.out";
+        const TARGET_SOLUTION_PATH: &str = "solution.out";
+
         let log_state = self.log_state.push("task type", "INTERACTIVE");
 
-        let src_test_path = path_from(
-            &format!("{}/{}", self.work_dir, TEST_DIR),
-            &format!("{}", self.test_id + 1),
-            TEST_EXT,
-        );
+        let src_test_path = self
+            .work_dir
+            .join(TEST_DIR)
+            .join(format!("{}", self.test_id + 1))
+            .with_extension(TEST_EXT);
 
-        let src_interactor_path = path_from(&self.work_dir, INTERACTOR_NAME, INTERACTOR_EXT);
-        let src_solution_path = path_from(&self.work_dir, SOLUTION_NAME, SOLUTION_EXT);
+        let src_interactor_path = self
+            .work_dir
+            .join(INTERACTOR_NAME)
+            .with_extension(INTERACTOR_EXT);
+        let src_solution_path = self
+            .work_dir
+            .join(SOLUTION_NAME)
+            .with_extension(SOLUTION_EXT);
 
         Arc::clone(&self.interactor_sandbox)
             .write_group_into_box(
                 vec![
-                    (File::open(&*src_test_path).await?, TARGET_TEST_PATH),
                     (
-                        File::open(&*src_interactor_path).await?,
+                        File::open(&*src_test_path)
+                            .await
+                            .context("opening target test")?,
+                        TARGET_TEST_PATH,
+                    ),
+                    (
+                        File::open(&*src_interactor_path)
+                            .await
+                            .context("opening target interactor")?,
                         TARGET_INTERACTOR_PATH,
                     ),
                 ]
                 .into_iter()
-                .map(|(from, to)| (from, Box::from(to)))
+                .map(|(from, to)| (from, Path::new(to)))
                 .collect(),
             )
             .await?;
         self.sandbox
             .write_into_box(
-                &mut File::open(&*src_solution_path).await?,
+                &mut File::open(&*src_solution_path)
+                    .await
+                    .context("opening target solution")?,
                 TARGET_SOLUTION_PATH,
             )
-            .await?;
+            .await
+            .context("writing into box target solution")?;
 
-        let solution_input_channel = Channel::new(CHANNEL_DIR).await?;
-        let solution_output_channel = Channel::new(CHANNEL_DIR).await?;
+        let solution_input_channel = Channel::new(CHANNEL_DIR)
+            .await
+            .context("creating solution input channel")?;
+        let solution_output_channel = Channel::new(CHANNEL_DIR)
+            .await
+            .context("creatring solution output channel")?;
 
         let _solution_output_keeper = File::options()
             .read(true)
             .write(true)
             .open(&*solution_output_channel.0)
-            .await?;
+            .await
+            .context("creatring output keeper")?;
 
         let _solution_input_keeper = File::options()
             .read(true)
             .write(true)
             .open(&*solution_input_channel.0)
-            .await?;
+            .await
+            .context("creating input keeper")?;
 
         let interactor_sandbox_clone = Arc::clone(&self.interactor_sandbox);
         let lang = self.lang;
@@ -157,18 +176,18 @@ impl super::Enviroment for Enviroment {
             sandbox_clone.run(&cmd).await
         });
 
-        let solution_result = match solution_handler.await? {
+        let solution_result = match solution_handler.await.context("running solution")? {
             Ok(res) => res,
             Err(e) => {
-                log::error!("({log_state}) solution run error: {e:?}");
+                log::error!("{log_state} solution run error: {e}");
                 return Err(e);
             }
         };
 
-        let interactor_result = match interactor_handler.await? {
+        let interactor_result = match interactor_handler.await.context("runnong interactor")? {
             Ok(res) => res,
             Err(e) => {
-                log::error!("({log_state}) interactor run error: {e:?}");
+                log::error!("{log_state} interactor run error: {e}");
                 return Err(e);
             }
         };
@@ -179,7 +198,9 @@ impl super::Enviroment for Enviroment {
             .await
         {
             let mut output_error = String::new();
-            file.read_to_string(&mut output_error).await?;
+            file.read_to_string(&mut output_error)
+                .await
+                .context("reading target interactor output")?;
             output_error
         } else {
             String::new()
@@ -191,7 +212,9 @@ impl super::Enviroment for Enviroment {
             .await
         {
             let mut interactor_error = String::new();
-            file.read_to_string(&mut interactor_error).await?;
+            file.read_to_string(&mut interactor_error)
+                .await
+                .context("reading target interactor error")?;
             interactor_error
         } else {
             String::new()
@@ -257,7 +280,7 @@ impl super::Enviroment for Enviroment {
             time: solution_result.time,
         };
 
-        log::info!("({log_state}) judgement result:\n{result:#?}");
+        log::info!("{log_state} judgement result:\n{result:#?}");
 
         Ok(result)
     }

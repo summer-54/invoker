@@ -1,34 +1,41 @@
 use crate::prelude::*;
 
-use std::sync::Arc;
-
 use invoker_auth::{Cert, Challenge, policy};
+use tar_archive_rs::{self as archive, ArchiveItem};
 use tokio::{sync::mpsc::unbounded_channel, task::JoinHandle};
 
+use std::sync::Arc;
+
 use crate::{
-    Result, judge,
+    Result,
+    judge::{self, api::Lang},
     server::{
-        self, income,
-        outgo::{self, FullVerdict},
+        self,
+        stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream, master::FullVerdict},
     },
 };
-use tar_archive_rs::{self as archive, ArchiveItem};
 
-pub struct App<S: outgo::Sender, R: income::Receiver> {
-    pub sender: Arc<S>,
-    pub receiver: Arc<R>,
+pub struct App<AS: Stream<AuthIncome, AuthOutgo>, MS: Stream<MasterIncome, MasterOutgo>> {
+    pub auth_stream: AS,
+    pub master_stream: MS,
     pub judge_service: Arc<judge::Service>,
     pub cert: Arc<Cert>,
 }
 
-impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'static> App<S, R> {
+impl<
+    AS: Stream<AuthIncome, AuthOutgo> + Send + Sync + 'static,
+    MS: Stream<MasterIncome, MasterOutgo> + Send + Sync + 'static,
+> App<AS, MS>
+{
     pub fn start_judgment(
         self: &Arc<Self>,
-        data: Box<[u8]>,
-    ) -> JoinHandle<crate::Result<judge::api::submission::Result>> {
-        let self_clone = Arc::clone(&self);
+        lang: Lang,
+        package: Box<[u8]>,
+    ) -> JoinHandle<Result<judge::api::submission::Result>> {
+        use server::stream::MasterOutgo as Outgo;
+        let self_clone = Arc::clone(self);
         let (sender, mut receiver) = unbounded_channel::<(usize, judge::api::test::Result)>();
-        let handler = tokio::spawn(async move {
+        let handler: JoinHandle<Result<()>> = tokio::spawn(async move {
             while let Some((id, test_result)) = receiver.recv().await {
                 let data = archive::pack(&[
                     ArchiveItem {
@@ -41,13 +48,10 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                     },
                 ])
                 .await
-                .unwrap_or_else(|e| {
-                    log::error!("sending 'TestVerdict': compression error: {e:?}");
-                    vec![].into_boxed_slice()
-                });
+                .context("archiving test verdict")?;
                 self_clone
-                    .sender
-                    .send(server::outgo::Msg::TestVerdict {
+                    .master_stream
+                    .send(Outgo::TestVerdict {
                         test_id: id,
                         verdict: test_result.verdict,
                         time: test_result.time,
@@ -55,21 +59,23 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                         data,
                     })
                     .await
-                    .expect("websocket closed unexpectedly");
+                    .context("sending test verdict")?;
             }
+            Ok(())
         });
-        let self_clone = Arc::clone(&self);
+        let self_clone = Arc::clone(self);
 
         tokio::spawn(async move {
-            let package = archive::Archive::new(&*data);
+            let package = archive::Archive::new(&*package);
             let result = Arc::clone(&self_clone.judge_service)
-                .judge(package, sender)
-                .await;
-            _ = handler.await;
+                .judge(package, lang, sender)
+                .await
+                .context("judging");
+            _ = handler.await?;
             match &result {
                 Ok(full_verdict) => self_clone
-                    .sender
-                    .send(server::outgo::Msg::FullVerdict(match full_verdict {
+                    .master_stream
+                    .send(Outgo::FullVerdict(match full_verdict {
                         judge::api::submission::Result::Ok {
                             score,
                             groups_score,
@@ -81,19 +87,16 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
                         judge::api::submission::Result::Te(msg) => FullVerdict::Te(msg.clone()),
                     }))
                     .await
-                    .map_err(|e| {
-                        log::error!("sending message error: {e:?}");
-                    })
-                    .expect("message sending error"),
+                    .context("sending full verdict")?,
                 Err(e) => {
-                    log::error!("judger error: {e:?}");
+                    log::error!("{e}");
                     self_clone
-                        .sender
-                        .send(server::outgo::Msg::Error {
-                            msg: e.to_string().into_boxed_str(),
+                        .master_stream
+                        .send(Outgo::Error {
+                            msg: e.to_string().into(),
                         })
                         .await
-                        .unwrap();
+                        .context("sending error message")?
                 }
             }
             result
@@ -101,37 +104,67 @@ impl<S: outgo::Sender + Send + Sync + 'static, R: income::Receiver + Send + 'sta
     }
 
     async fn solve_challenge(&self, challenge: Challenge) -> Result<()> {
-        let solution = challenge.solve(&*self.cert, &policy::StandardPolicy::new())?;
-        self.sender
-            .send(outgo::Msg::ChallengeSolution(solution))
+        use server::stream::AuthOutgo as Outgo;
+        let solution = challenge
+            .solve(&self.cert, &policy::StandardPolicy::new())
+            .context("solving auth challenge")?;
+        self.auth_stream
+            .send(Outgo::ChallengeSolution(solution))
             .await
     }
 
-    pub async fn run(self: Arc<Self>) -> Result<()> {
-        use server::income::Msg;
+    async fn listen_master_stream(self: Arc<Self>) -> Result<()> {
+        use server::stream::MasterIncome as Income;
+        log::info!("master stream listener open");
         loop {
-            log::info!("message listner open");
-            let msg = self.receiver.recv().await.context("reading message")?;
+            let msg = self
+                .master_stream
+                .recv()
+                .await
+                .context("reading master message")?;
+            log::trace!("master stream receive message {msg:#?}");
             match msg {
-                Msg::AuthVerdict(verdict) => {
-                    if !verdict {
-                        bail!("auth FAILED");
-                    }
-                }
-                Msg::Challenge(challenge) => (&*self)
-                    .solve_challenge(challenge)
-                    .await
-                    .context("solving auth challenge")?,
-                Msg::Start { data } => _ = self.start_judgment(data),
-                Msg::Stop => self
+                Income::Run { lang, data } => _ = self.start_judgment(lang, data),
+                Income::Stop => self
                     .judge_service
                     .cancel_all_tests()
                     .await
                     .context("all tests cancelling")?,
-                Msg::Close => break,
+                Income::Close => break,
             }
         }
-        log::info!("message listner close");
+        log::info!("master stream listener close");
         Result::<()>::Ok(())
+    }
+
+    async fn listen_auth_stream(self: Arc<Self>) -> Result<()> {
+        use server::stream::AuthIncome as Income;
+        log::info!("auth stream listener open");
+        loop {
+            let msg = self
+                .auth_stream
+                .recv()
+                .await
+                .context("reading auth message")?;
+            log::trace!("auth stream receive message {msg:#?}");
+            match msg {
+                Income::Verdict(verdict) => {
+                    if !verdict {
+                        bail!("auth FAILED");
+                    }
+                }
+                Income::Challenge(challenge) => self
+                    .solve_challenge(challenge)
+                    .await
+                    .context("solving auth challenge")?,
+            }
+        }
+    }
+
+    pub async fn run(self: &Arc<Self>) -> Result<()> {
+        tokio::select! {
+            res = tokio::spawn(Arc::clone(self).listen_master_stream()) => res.context("listening master stream")?,
+            res = tokio::spawn(Arc::clone(self).listen_auth_stream()) => res.context("listening auth stream")?,
+        }
     }
 }

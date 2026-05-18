@@ -1,33 +1,33 @@
-use std::sync::Arc;
+use crate::prelude::*;
 
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _, task::JoinHandle};
 
+use std::{path::Path, sync::Arc};
+
+use crate::{LogState, Result};
+
 use super::{
-    Lang, SOLUTION_EXT, SOLUTION_NAME,
-    api::{submission, test},
-    path_from,
-};
-use crate::{
-    LogState, Result,
-    sandbox::{self, Command, MaybeLimited::*, RunStatus},
+    api::{Lang, submission, test},
+    consts::*,
+    sandbox::{self, Command, RunStatus},
 };
 
 const CHECKER_NAME: &str = "checker";
-const CHECKER_EXT: Option<&str> = Some("out");
+const CHECKER_EXT: &str = "out";
 
 const INPUT_DIR: &str = "input";
-const INPUT_EXT: Option<&str> = Some("txt");
+const INPUT_EXT: &str = "txt";
 
 const CORRECT_DIR: &str = "correct";
-const CORRECT_EXT: Option<&str> = Some("txt");
+const CORRECT_EXT: &str = "txt";
 
-pub struct Enviroment {
+pub struct Environment {
     sandbox: Arc<sandbox::Sandbox>,
     limits: submission::Limits,
     lang: Lang,
 
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
     test_id: usize,
     log_state: Arc<LogState>,
 }
@@ -36,16 +36,16 @@ pub async fn prepare(
     sandboxes: Arc<sandbox::Service>,
     lang: Lang,
     limits: submission::Limits,
-    work_dir: Box<str>,
+    work_dir: Box<Path>,
 
     test_id: usize,
     log_state: Arc<LogState>,
-) -> Result<Enviroment> {
+) -> Result<Environment> {
     let sandbox = Arc::new(sandboxes.initialize_sandbox().await?);
 
-    let log_state = log_state.push("box_id", &*format!("{}", sandbox.id()));
+    let log_state = log_state.push("box_id", sandbox.id());
 
-    Ok(Enviroment {
+    Ok(Environment {
         sandbox,
         lang,
         limits,
@@ -56,23 +56,27 @@ pub async fn prepare(
 }
 
 #[async_trait]
-impl super::Enviroment for Enviroment {
+impl super::Environment for Environment {
     async fn run(self: Box<Self>) -> Result<test::Result> {
         let log_state = self.log_state.push("task type", "STANDARD");
-        log::trace!("({log_state}) testing STARTED");
-        let src_input_path = super::path_from(
-            &format!("{}/{INPUT_DIR}", self.work_dir),
-            &format!("{}", self.test_id + 1),
-            INPUT_EXT,
-        );
-        let src_correct_path = path_from(
-            &format!("{}/{CORRECT_DIR}", self.work_dir),
-            &format!("{}", self.test_id + 1),
-            CORRECT_EXT,
-        );
-        let src_checker_path = path_from(&self.work_dir, CHECKER_NAME, CHECKER_EXT);
+        log::trace!("({log_state}) testing started");
+        let src_input_path = self
+            .work_dir
+            .join(INPUT_DIR)
+            .join(format!("{}", self.test_id + 1))
+            .with_extension(INPUT_EXT);
+        let src_correct_path = self
+            .work_dir
+            .join(CORRECT_DIR)
+            .join(format!("{}", self.test_id + 1))
+            .with_extension(CORRECT_EXT);
 
-        let src_solution_path = path_from(&self.work_dir, SOLUTION_NAME, SOLUTION_EXT);
+        let src_checker_path = self.work_dir.join(CHECKER_NAME).with_extension(CHECKER_EXT);
+
+        let src_solution_path = self
+            .work_dir
+            .join(SOLUTION_NAME)
+            .with_extension(SOLUTION_EXT);
 
         const TARGET_INPUT_PATH: &str = "in.txt";
         const TARGET_CORRECT_PATH: &str = "correct.txt";
@@ -86,12 +90,27 @@ impl super::Enviroment for Enviroment {
         Arc::clone(&self.sandbox)
             .write_group_into_box(
                 vec![
-                    (File::open(&*src_input_path).await?, TARGET_INPUT_PATH),
-                    (File::open(&*src_checker_path).await?, TARGET_CHECKER_PATH),
-                    (File::open(&*src_solution_path).await?, TARGET_SOLUTION_PATH),
+                    (
+                        File::open(&*src_input_path)
+                            .await
+                            .context("open src input")?,
+                        TARGET_INPUT_PATH,
+                    ),
+                    (
+                        File::open(&*src_checker_path)
+                            .await
+                            .context("open src checker")?,
+                        TARGET_CHECKER_PATH,
+                    ),
+                    (
+                        File::open(&*src_solution_path)
+                            .await
+                            .context("open src solution")?,
+                        TARGET_SOLUTION_PATH,
+                    ),
                 ]
                 .into_iter()
-                .map(|(from, to)| (from, Box::from(to)))
+                .map(|(from, to)| (from, Path::new(to)))
                 .collect(),
             )
             .await?;
@@ -113,14 +132,17 @@ impl super::Enviroment for Enviroment {
         let solution_result = match self.sandbox.run(&solution_cmd).await {
             Ok(res) => res,
             Err(e) => {
-                log::error!("({log_state}) solution run error: {e:?}");
+                log::error!("{log_state} solution run error: {e}");
                 return Err(e);
             }
         };
 
         let mut output_file = self.sandbox.read_from_box(TARGET_OUTPUT_PATH).await?;
         let mut output = String::new();
-        output_file.read_to_string(&mut output).await?;
+        output_file
+            .read_to_string(&mut output)
+            .await
+            .context("reading output file")?;
         let output = Arc::from(output.as_str());
 
         if let Some(verdict) = test::Verdict::from_run_status(solution_result.status) {
@@ -142,9 +164,10 @@ impl super::Enviroment for Enviroment {
         if let Ok(mut correct) = File::open(&*src_correct_path).await {
             self.sandbox
                 .write_into_box(&mut correct, TARGET_CORRECT_PATH)
-                .await?;
+                .await
+                .context("writing into box target correct")?;
         } else {
-            log::debug!("({log_state}) correct file not founded");
+            log::debug!("{log_state} correct file not founded");
         }
 
         let mut checker_cmd = Command::new(format!("./{TARGET_CHECKER_PATH}"));
@@ -158,7 +181,7 @@ impl super::Enviroment for Enviroment {
         let checker_result = match self.sandbox.run(&checker_cmd).await {
             Ok(res) => res,
             Err(e) => {
-                log::error!("({log_state}) checker error: {e:?}");
+                log::error!("{log_state} checker error: {e}");
                 return Err(e);
             }
         };
@@ -168,7 +191,8 @@ impl super::Enviroment for Enviroment {
             let mut output = String::new();
             sandbox_clone
                 .read_from_box(TARGET_CHECKER_OUTPUT_PATH)
-                .await?
+                .await
+                .context("reading from box checker output")?
                 .read_to_string(&mut output)
                 .await?;
             Ok(output)
@@ -179,7 +203,8 @@ impl super::Enviroment for Enviroment {
             let mut output = String::new();
             sandbox_clone
                 .read_from_box(TARGET_CHECKER_ERROR_PATH)
-                .await?
+                .await
+                .context("reading from box checker error")?
                 .read_to_string(&mut output)
                 .await?;
             Ok(output)

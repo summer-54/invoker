@@ -1,7 +1,5 @@
 type: standard
 
-lang: g++
-
 limits:
   time: 2
   real_time: 2

@@ -1,19 +1,29 @@
 use crate::prelude::*;
-pub struct Channel(pub Box<str>);
+
+use crate::logger::LogState;
+
+pub struct Channel(pub Box<Path>);
 
 impl Channel {
-    pub async fn new(dir: &str) -> Result<Channel> {
+    pub async fn new(dir: impl AsRef<Path>) -> Result<Channel> {
         let id: u64 = rand::random();
-        let path = format!("{dir}/{id}").into_boxed_str();
+        let path = dir.as_ref().join(format!("{id}")).into_boxed_path();
 
         let status = tokio::process::Command::new("mkfifo")
             .arg("-m")
-            .arg("777")
+            .arg("666")
             .arg(&*path)
             .status()
-            .await?;
+            .await
+            .context("executing command mkfifo")?;
         if status.success() {
-            log::trace!("new by path: {path}");
+            let log_state = LogState::new()
+                .push("id", id.to_string())
+                .push("path", path.as_ref().display().to_string());
+            log::trace!(
+                "{log_state} new channel created at {}",
+                path.display().to_string().bright_white()
+            );
 
             Ok(Channel(path))
         } else {
@@ -25,9 +35,8 @@ impl Channel {
 impl Drop for Channel {
     fn drop(&mut self) {
         let path = self.0.clone();
-        tokio::spawn(async move {
-            log::trace!("deleated by path: {path}");
-            tokio::fs::remove_file(path.to_string()).await
-        });
+        let log_state = LogState::new().push("path", path.display().to_string());
+        std::fs::remove_file(path).unwrap_or_else(|e| log::error!("channel deleating error: {e}"));
+        log::trace!("{log_state} channel deleted");
     }
 }
