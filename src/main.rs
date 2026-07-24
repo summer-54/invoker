@@ -1,8 +1,6 @@
 mod application;
 mod channel;
-mod consts;
 mod judge;
-mod logger;
 #[cfg(feature = "mock")]
 mod mock;
 mod prelude;
@@ -11,17 +9,21 @@ mod server;
 mod types;
 
 use prelude::*;
+use toaster_lib_rs::logger;
 
 use logger::LogState;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use invoker_auth::{Cert, Parse};
 use std::{path::Path, sync::Arc};
+use toaster_lib_rs::auth::{Cert, Parse};
 
 use crate::{
     application::App,
-    server::stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream},
+    server::stream::{
+        AUTH_NAME, AuthIncome, AuthOutgo, JUDGE_NAME, JudgeIncome, JudgeOutgo, MASTER_NAME,
+        MasterIncome, MasterOutgo, Stream,
+    },
 };
 
 #[cfg(not(feature = "mock"))]
@@ -52,9 +54,14 @@ impl Config {
     }
 }
 
-struct Communication<A: Stream<AuthIncome, AuthOutgo>, M: Stream<MasterIncome, MasterOutgo>> {
+struct Communication<
+    A: Stream<AuthIncome, AuthOutgo>,
+    M: Stream<MasterIncome, MasterOutgo>,
+    J: Stream<JudgeIncome, JudgeOutgo>,
+> {
     auth_stream: A,
     master_stream: M,
+    judge_stream: J,
 }
 
 #[cfg(not(feature = "mock"))]
@@ -62,10 +69,14 @@ async fn init_websocket_communication(
     config: Arc<Config>,
 ) -> Result<(
     tokio::task::JoinHandle<Result<()>>,
-    Communication<impl Stream<AuthIncome, AuthOutgo>, impl Stream<MasterIncome, MasterOutgo>>,
+    Communication<
+        impl Stream<AuthIncome, AuthOutgo>,
+        impl Stream<MasterIncome, MasterOutgo>,
+        impl Stream<JudgeIncome, JudgeOutgo>,
+    >,
 )> {
     let channel = Arc::new(
-        websocket::Channel::new(
+        websocket::Channel::bind(
             config.manager_host.as_ref(),
             Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
         )
@@ -73,8 +84,9 @@ async fn init_websocket_communication(
     );
 
     let communication = Communication {
-        auth_stream: channel.new_stream(consts::streams_names::AUTH).await,
-        master_stream: channel.new_stream(consts::streams_names::MASTER).await,
+        auth_stream: channel.new_stream(AUTH_NAME).await,
+        master_stream: channel.new_stream(MASTER_NAME).await,
+        judge_stream: channel.new_stream(JUDGE_NAME).await,
     };
 
     let handler = tokio::spawn(channel.run());
@@ -152,7 +164,14 @@ async fn main() -> Result<()> {
     let app = App {
         master_stream: communication.master_stream,
         auth_stream: communication.auth_stream,
-        judge_service: Arc::new(judge::Service::new(&config.config_dir, judger_work_dir).await?),
+        judge_service: Arc::new(
+            judge::Service::new(
+                &config.config_dir,
+                judger_work_dir,
+                communication.judge_stream,
+            )
+            .await?,
+        ),
         cert: Arc::new(cert),
     };
 

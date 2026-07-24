@@ -8,7 +8,7 @@ use std::{path::Path, sync::Arc};
 use crate::{LogState, Result};
 
 use super::{
-    api::{Lang, submission, test},
+    api::{Lang, command_to_run, submission, test},
     consts::*,
     sandbox::{self, Command, RunStatus},
 };
@@ -57,7 +57,7 @@ pub async fn prepare(
 
 #[async_trait]
 impl super::Environment for Environment {
-    async fn run(self: Box<Self>) -> Result<test::Result> {
+    async fn run(self: Box<Self>) -> Result<test::Artifact> {
         let log_state = self.log_state.push("task type", "STANDARD");
         log::trace!("({log_state}) testing started");
         let src_input_path = self
@@ -115,7 +115,7 @@ impl super::Environment for Environment {
             )
             .await?;
 
-        let mut solution_cmd = self.lang.command_to_run(TARGET_SOLUTION_PATH);
+        let mut solution_cmd = command_to_run(self.lang, TARGET_SOLUTION_PATH);
         solution_cmd
             .time(Limited(self.limits.time))
             .memory(Limited(self.limits.memory))
@@ -145,11 +145,13 @@ impl super::Environment for Environment {
             .context("reading output file")?;
         let output = Arc::from(output.as_str());
 
-        if let Some(verdict) = test::Verdict::from_run_status(solution_result.status) {
-            return Ok(test::Result {
-                verdict,
-                time: solution_result.time,
-                memory: solution_result.memory,
+        if let Some(verdict) = solution_result.status.to_verdict() {
+            return Ok(test::Artifact {
+                result: test::Result {
+                    verdict,
+                    time: solution_result.time,
+                    memory: solution_result.memory,
+                },
                 output,
                 message: Arc::from(
                     format!(
@@ -238,13 +240,15 @@ impl super::Environment for Environment {
             ),
         };
 
-        let result = test::Result {
-            verdict,
-            message: Arc::from(message),
+        let result = test::Artifact {
+            result: test::Result {
+                verdict,
 
+                memory: solution_result.memory,
+                time: solution_result.time,
+            },
+            message: Arc::from(message),
             output,
-            memory: solution_result.memory,
-            time: solution_result.time,
         };
 
         log::info!("({log_state}) judgement result:\n{result:#?}");

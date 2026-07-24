@@ -11,11 +11,12 @@ use async_trait::async_trait;
 use configo::Config as _;
 use consts::*;
 use serde::{Deserialize, Serialize};
-use tar_archive_rs as archive;
+use tar_archive_rs::{self as archive};
+use toaster_lib_rs::server::stream::Stream;
 use tokio::{
     fs::{File, create_dir, create_dir_all, remove_dir_all},
     io::AsyncReadExt,
-    sync::{Mutex, Semaphore, mpsc::UnboundedSender},
+    sync::{Mutex, Semaphore},
     task::JoinHandle,
 };
 
@@ -23,7 +24,11 @@ use std::{
     collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, sync::Arc,
 };
 
-use crate::{LogState, Result, types::MaybeLimited};
+use crate::{
+    LogState, Result,
+    server::stream::{JudgeIncome, JudgeOutgo},
+    types::MaybeLimited,
+};
 
 use api::{
     Lang,
@@ -90,22 +95,28 @@ impl Config {
     }
 }
 
-pub struct Service {
+pub struct Service<JS: Stream<JudgeIncome, JudgeOutgo>> {
     config: Config,
     work_dir: Box<Path>,
 
+    judge_stream: JS,
+
     semaphore: Semaphore,
     sandboxes: Arc<sandbox::Service>,
-    handler: Mutex<Option<JoinHandle<()>>>,
+    handler: Mutex<Option<JoinHandle<Result<()>>>>,
 }
 
 #[async_trait]
 pub trait Environment: Send {
-    async fn run(self: Box<Self>) -> Result<test::Result>;
+    async fn run(self: Box<Self>) -> Result<test::Artifact>;
 }
 
-impl Service {
-    pub async fn new(config_dir: impl AsRef<Path>, work_dir: impl AsRef<Path>) -> Result<Service> {
+impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
+    pub async fn new(
+        config_dir: impl AsRef<Path>,
+        work_dir: impl AsRef<Path>,
+        judge_stream: JS,
+    ) -> Result<Self> {
         let config = Config::load(&config_dir)
             .await
             .context("loading judge config")?;
@@ -129,12 +140,13 @@ impl Service {
             config,
             work_dir: work_dir.as_ref().into(),
             sandboxes,
+            judge_stream,
             handler: Mutex::new(None),
             semaphore: Semaphore::new(1),
         })
     }
 
-    pub async fn cancel_all_tests(&self) -> Result<()> {
+    async fn cancel_all_tests(&self) -> Result<()> {
         self.semaphore.close();
         if let Some(handler) = &*self.handler.lock().await {
             handler.abort();
@@ -207,11 +219,10 @@ impl Service {
         Ok(None)
     }
 
-    pub async fn judge<R: Unpin + tokio::io::AsyncRead>(
+    async fn judge<R: Unpin + tokio::io::AsyncRead>(
         self: Arc<Self>,
         mut package: archive::Archive<R>,
         lang: Lang,
-        sender: UnboundedSender<(usize, test::Result)>,
     ) -> Result<submission::Result> {
         let permit = self.semaphore.try_acquire()?;
         log::info!("testing started");
@@ -267,15 +278,20 @@ impl Service {
                     .context("environment preparing")?;
 
                 let blocked_groups = Arc::clone(&blocked_groups);
-                let sender = sender.clone();
+                let this = self.clone();
 
                 handlers.push(tokio::spawn(async move {
-                    let result = environment.run().await.context("environment running")?;
-                    sender
-                        .send((test_number + 1, result.clone()))
-                        .context("internal sending test result")
-                        .unwrap_or_else(|e| log::error!("{e}"));
-                    if !result.verdict.is_success() {
+                    let artifact = environment.run().await.context("environment running")?;
+                    let payload = artifact
+                        .into_payload(test_number + 1)
+                        .await
+                        .context("internal sending test result")?;
+                    let verdict = payload.result.verdict;
+                    this.judge_stream
+                        .send(JudgeOutgo::TestResult(payload))
+                        .await
+                        .context("sending test result")?;
+                    if !verdict.is_success() {
                         let block = &mut blocked_groups.lock().await[group.id];
                         if let Some(id) = block {
                             *block = Some(std::cmp::min(*id, test_number));
@@ -353,5 +369,65 @@ impl Service {
                 .context("interactive preparing")?,
             ) as Box<dyn Environment>,
         })
+    }
+
+    pub async fn run(self: &Arc<Self>) -> Result<()> {
+        loop {
+            match match self.judge_stream.recv().await.context("recv judge stream") {
+                Ok(msg) => msg,
+                Err(e) => {
+                    log::error!("{e}");
+                    continue;
+                }
+            } {
+                JudgeIncome::Run { lang, data } => {
+                    let self_clone = Arc::clone(self);
+
+                    *self.handler.lock().await = Some(tokio::spawn(async move {
+                        let package = archive::Archive::new(&*data);
+                        let result = Arc::clone(&self_clone)
+                            .judge(package, lang)
+                            .await
+                            .context("judging");
+                        match &result {
+                            Ok(full_verdict) => self_clone
+                                .judge_stream
+                                .send(JudgeOutgo::FullResult(match full_verdict {
+                                    submission::Result::Ok {
+                                        score,
+                                        groups_score,
+                                    } => submission::Result::Ok {
+                                        score: *score,
+                                        groups_score: groups_score.clone(),
+                                    },
+                                    submission::Result::Ce(msg) => {
+                                        submission::Result::Ce(msg.clone())
+                                    }
+                                    submission::Result::Te(msg) => {
+                                        submission::Result::Te(msg.clone())
+                                    }
+                                }))
+                                .await
+                                .context("sending full verdict")?,
+                            Err(e) => {
+                                log::error!("{e}");
+                                self_clone
+                                    .judge_stream
+                                    .send(JudgeOutgo::Error {
+                                        msg: e.to_string().into(),
+                                    })
+                                    .await
+                                    .context("sending error message")?
+                            }
+                        }
+                        Ok(())
+                    }));
+                }
+                JudgeIncome::Stop => self
+                    .cancel_all_tests()
+                    .await
+                    .context("all tests cancelling")?,
+            }
+        }
     }
 }

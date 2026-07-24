@@ -4,10 +4,11 @@ use crate::prelude::*;
 
 pub use command::Command;
 
+use super::api::test::Verdict;
 use bytesize::ByteSize;
 use configo::Config as _;
-use resource_pool::ResourcePool;
 use serde::{Deserialize, Serialize};
+use toaster_lib_rs::poll::ResourcePool;
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncWriteExt},
@@ -211,13 +212,25 @@ impl Service {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RunStatus {
     Ok,
     Tl,
     Ml,
     Re(u8),
     Sg(u8),
+}
+
+impl RunStatus {
+    pub fn to_verdict(self) -> Option<super::api::test::Verdict> {
+        Some(match self {
+            Self::Ok => return None,
+            Self::Tl => Verdict::Tl,
+            Self::Ml => Verdict::Ml,
+            Self::Re(_) => Verdict::Re,
+            Self::Sg(_) => Verdict::Re,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -377,9 +390,9 @@ impl Sandbox {
 
         _ = command.status().await.context("running command")?;
 
-        let meta = tokio::fs::read_to_string(meta_path)
+        let meta = tokio::fs::read_to_string(&meta_path)
             .await
-            .context("reading file '{meta_path}'")?;
+            .context(format!("reading file '{:?}'", meta_path.to_str()))?;
         log::trace!("({log_st}) meta file:\n{meta}");
         let meta = parse_meta_file(&meta);
 

@@ -9,7 +9,7 @@ use tokio::{fs::File, io::AsyncReadExt as _};
 use crate::{LogState, channel::Channel};
 
 use super::{
-    api::{Lang, submission, test},
+    api::{Lang, command_to_run, submission, test},
     consts::*,
     sandbox::{self, RunStatus},
 };
@@ -53,7 +53,7 @@ pub async fn prepare(
 
 #[async_trait]
 impl super::Environment for Environment {
-    async fn run(self: Box<Self>) -> Result<test::Result> {
+    async fn run(self: Box<Self>) -> Result<test::Artifact> {
         const TEST_DIR: &str = "test";
         const TEST_EXT: &str = "txt";
 
@@ -143,7 +143,7 @@ impl super::Environment for Environment {
         let solution_output_channel_path = solution_output_channel.0.clone();
         let solution_input_channel_path = solution_input_channel.0.clone();
         let interactor_handler = tokio::spawn(async move {
-            let mut cmd = lang.command_to_run(TARGET_INTERACTOR_PATH);
+            let mut cmd = command_to_run(lang, TARGET_INTERACTOR_PATH);
             cmd.args([TARGET_TEST_PATH, TARGET_INTERACTOR_OUTPUT_PATH])
                 .time(MaybeLimited::Limited(time_limit))
                 .real_time(MaybeLimited::Limited(real_time_limit))
@@ -162,7 +162,7 @@ impl super::Environment for Environment {
         let solution_output_channel_path = solution_output_channel.0.clone();
 
         let solution_handler = tokio::spawn(async move {
-            let mut cmd = lang.command_to_run(TARGET_SOLUTION_PATH);
+            let mut cmd = command_to_run(lang, TARGET_SOLUTION_PATH);
             cmd.time(MaybeLimited::Limited(time_limit))
                 .memory(MaybeLimited::Limited(memory_limit))
                 .real_time(MaybeLimited::Limited(real_time_limit));
@@ -220,11 +220,13 @@ impl super::Environment for Environment {
             String::new()
         });
 
-        if let Some(verdict) = test::Verdict::from_run_status(solution_result.status) {
-            return Ok(test::Result {
-                verdict,
-                time: solution_result.time,
-                memory: solution_result.memory,
+        if let Some(verdict) = solution_result.status.to_verdict() {
+            return Ok(test::Artifact {
+                result: test::Result {
+                    verdict,
+                    time: solution_result.time,
+                    memory: solution_result.memory,
+                },
                 output: interactor_output,
                 message: Arc::from(
                     format!(
@@ -271,17 +273,19 @@ impl super::Environment for Environment {
             ),
         };
 
-        let result = test::Result {
-            verdict,
-            message: Arc::from(message),
+        let artifact = test::Artifact {
+            result: test::Result {
+                verdict,
 
+                time: solution_result.time,
+                memory: solution_result.memory,
+            },
             output: interactor_output,
-            memory: solution_result.memory,
-            time: solution_result.time,
+            message: Arc::from(message),
         };
 
-        log::info!("{log_state} judgement result:\n{result:#?}");
+        log::info!("{log_state} judgement result:\n{artifact:#?}");
 
-        Ok(result)
+        Ok(artifact)
     }
 }
