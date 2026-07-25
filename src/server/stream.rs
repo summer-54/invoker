@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 pub use super::server_lib::stream::{
     Stream,
     auth::{InvokerToManager as AuthOutgo, ManagerToInvoker as AuthIncome, NAME as AUTH_NAME},

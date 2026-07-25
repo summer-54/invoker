@@ -7,45 +7,37 @@ use tokio::sync::{
 
 use crate::{
     logger::LogState,
-    server::stream::{AuthIncome, AuthOutgo, MasterIncome, MasterOutgo, Stream},
+    server::stream::{AuthOutgo, JudgeIncome, JudgeOutgo, MasterOutgo, Stream},
 };
+
+pub use toaster_lib_rs::server::mock::Mock;
 
 async fn eternal() -> ! {
     futures::future::pending().await
 }
 
-pub struct AuthStream;
-impl AuthStream {
+pub fn auth_log(msg: AuthOutgo) {
+    let log_state = LogState::new().push("stream", "mock::auth");
+    log::info!("{log_state} <- {msg:?}");
+}
+
+pub fn master_log(msg: MasterOutgo) {
+    let log_state = LogState::new().push("stream", "mock::master");
+    log::info!("{log_state} <- {msg:?}");
+}
+
+pub struct JudgeStream {
+    receiver: Mutex<UnboundedReceiver<JudgeIncome>>,
+}
+
+impl JudgeStream {
     fn log_state() -> std::sync::Arc<LogState> {
-        LogState::new().push("stream", "mock::auth")
+        LogState::new().push("stream", "mock::judge")
     }
 }
 
-impl Stream<AuthIncome, AuthOutgo> for AuthStream {
-    async fn recv(&self) -> Result<AuthIncome> {
-        let log_state = Self::log_state();
-        log::trace!("{log_state} waiting message... (eternal)");
-        eternal().await
-    }
-    async fn send(&self, msg: AuthOutgo) -> Result<()> {
-        let log_state = Self::log_state();
-        log::info!("{log_state} <- {msg:?}");
-        Ok(())
-    }
-}
-
-pub struct MasterStream {
-    receiver: Mutex<UnboundedReceiver<MasterIncome>>,
-}
-
-impl MasterStream {
-    fn log_state() -> std::sync::Arc<LogState> {
-        LogState::new().push("stream", "mock::master")
-    }
-}
-
-impl Stream<MasterIncome, MasterOutgo> for MasterStream {
-    async fn recv(&self) -> Result<MasterIncome> {
+impl Stream<JudgeIncome, JudgeOutgo> for JudgeStream {
+    async fn recv(&self) -> Result<JudgeIncome> {
         let log_state = Self::log_state();
         log::trace!("{log_state} waiting message...");
         let Some(msg) = self.receiver.lock().await.recv().await else {
@@ -55,19 +47,19 @@ impl Stream<MasterIncome, MasterOutgo> for MasterStream {
         log::info!("{log_state} -> {msg:?}");
         Ok(msg)
     }
-    async fn send(&self, msg: MasterOutgo) -> Result<()> {
+    async fn send(&self, msg: JudgeOutgo) -> Result<()> {
         let log_state = Self::log_state();
         log::info!("{log_state} <- {msg:?}");
         Ok(())
     }
 }
 
-impl MasterStream {
-    pub fn new() -> (UnboundedSender<MasterIncome>, MasterStream) {
+impl JudgeStream {
+    pub fn new() -> (UnboundedSender<JudgeIncome>, JudgeStream) {
         let (sender, receiver) = unbounded_channel();
         (
             sender,
-            MasterStream {
+            JudgeStream {
                 receiver: Mutex::new(receiver),
             },
         )

@@ -21,20 +21,20 @@ use toaster_lib_rs::auth::{Cert, Parse};
 use crate::{
     application::App,
     server::stream::{
-        AUTH_NAME, AuthIncome, AuthOutgo, JUDGE_NAME, JudgeIncome, JudgeOutgo, MASTER_NAME,
-        MasterIncome, MasterOutgo, Stream,
+        AuthIncome, AuthOutgo, JudgeIncome, JudgeOutgo, MasterIncome, MasterOutgo, Stream,
     },
 };
 
 #[cfg(not(feature = "mock"))]
 use {
-    crate::server::websocket::{self, Uri},
+    crate::server::{
+        stream::{AUTH_NAME, JUDGE_NAME, MASTER_NAME},
+        websocket::{self, Uri},
+    },
     std::str::FromStr,
 };
 #[derive(Clone, Deserialize, Debug)]
 struct Config {
-    #[cfg(feature = "mock")]
-    pub loader_dir: Box<Path>,
     #[cfg(not(feature = "mock"))]
     pub manager_host: Box<str>,
     pub config_dir: Box<Path>,
@@ -95,27 +95,25 @@ async fn init_websocket_communication(
 }
 
 #[cfg(feature = "mock")]
-async fn init_mock_communication(
-    config: Arc<Config>,
-) -> (
-    tokio::sync::mpsc::UnboundedSender<MasterIncome>,
+async fn init_mock_communication() -> (
+    tokio::sync::mpsc::UnboundedSender<JudgeIncome>,
     Communication<
         impl Stream<AuthIncome, AuthOutgo>,
         impl Stream<MasterIncome, MasterOutgo>,
-        impl Stream<LoadIncome, LoadOutgo>,
+        impl Stream<JudgeIncome, JudgeOutgo>,
     >,
 ) {
-    use crate::mock::{AuthStream, MasterStream};
+    use crate::mock::{JudgeStream, Mock, auth_log, master_log};
 
     log::info!("{} communication initialized", "mock".bold());
-    let (sender, master_stream) = MasterStream::new();
-    let load_stream = LoadStream::new(&config.loader_dir);
+    let (sender, judge_stream) = JudgeStream::new();
+    // let load_stream = LoadStream::new(&config.loader_dir);
     (
         sender,
         Communication {
-            auth_stream: AuthStream,
-            master_stream,
-            load_stream,
+            auth_stream: Mock::new(auth_log),
+            master_stream: Mock::new(master_log),
+            judge_stream,
         },
     )
 }
@@ -144,7 +142,7 @@ async fn main() -> Result<()> {
     #[cfg(feature = "mock")]
     let communication = {
         let mut args = std::env::args().skip(1);
-        let (master_sender, communication) = init_mock_communication(Arc::clone(&config)).await;
+        let (master_sender, communication) = init_mock_communication().await;
         while let Some(name) = args.next() {
             let Some(lang) = args.next() else {
                 bail!("lang was not founded")
@@ -155,7 +153,7 @@ async fn main() -> Result<()> {
                 .await
                 .context(format!("reading file '{name}'"))?
                 .into_boxed_slice();
-            master_sender.send(MasterIncome::Run { lang, data })?;
+            master_sender.send(JudgeIncome::Run { lang, data })?;
         }
         communication
     };
