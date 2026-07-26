@@ -169,7 +169,7 @@ TYPE CLOSE
 master
 TYPE TOKEN
 ID <uuid: token>
-KEY <str: name>
+NAME <str: name>
 ```
 
 ##### Test Verdict

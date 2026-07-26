@@ -373,10 +373,15 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
 
     pub async fn run(self: &Arc<Self>) -> Result<()> {
         loop {
-            match match self.judge_stream.recv().await.context("recv judge stream") {
+            match match self
+                .judge_stream
+                .recv()
+                .await
+                .context("recv judge stream")?
+            {
                 Ok(msg) => msg,
                 Err(e) => {
-                    log::error!("{e}");
+                    log::error!("{e:?}");
                     continue;
                 }
             } {
@@ -410,7 +415,7 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
                                 .await
                                 .context("sending full verdict")?,
                             Err(e) => {
-                                log::error!("{e}");
+                                log::error!("{e:?}");
                                 self_clone
                                     .judge_stream
                                     .send(JudgeOutgo::Error {

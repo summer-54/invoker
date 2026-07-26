@@ -36,7 +36,8 @@ impl Drop for Channel {
     fn drop(&mut self) {
         let path = self.0.clone();
         let log_state = LogState::new().push("path", path.display().to_string());
-        std::fs::remove_file(path).unwrap_or_else(|e| log::error!("channel deleating error: {e}"));
+        std::fs::remove_file(path)
+            .unwrap_or_else(|e| log::error!("channel deleating error: {e:?}"));
         log::trace!("{log_state} channel deleted");
     }
 }

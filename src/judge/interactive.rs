@@ -179,7 +179,7 @@ impl super::Environment for Environment {
         let solution_result = match solution_handler.await.context("running solution")? {
             Ok(res) => res,
             Err(e) => {
-                log::error!("{log_state} solution run error: {e}");
+                log::error!("{log_state} solution run error: {e:?}");
                 return Err(e);
             }
         };
@@ -187,7 +187,7 @@ impl super::Environment for Environment {
         let interactor_result = match interactor_handler.await.context("runnong interactor")? {
             Ok(res) => res,
             Err(e) => {
-                log::error!("{log_state} interactor run error: {e}");
+                log::error!("{log_state} interactor run error: {e:?}");
                 return Err(e);
             }
         };

@@ -49,11 +49,11 @@ impl<
                 .master_stream
                 .recv()
                 .await
-                .context("reading master message")
+                .context("reading master message")?
             {
                 Ok(msg) => msg,
                 Err(e) => {
-                    log::error!("{e}");
+                    log::error!("{e:?}");
                     continue;
                 }
             };
@@ -74,11 +74,11 @@ impl<
                 .auth_stream
                 .recv()
                 .await
-                .context("reading auth message")
+                .context("reading auth message")?
             {
                 Ok(msg) => msg,
                 Err(e) => {
-                    log::error!("{e}");
+                    log::error!("{e:?}");
                     continue;
                 }
             };

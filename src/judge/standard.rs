@@ -132,7 +132,7 @@ impl super::Environment for Environment {
         let solution_result = match self.sandbox.run(&solution_cmd).await {
             Ok(res) => res,
             Err(e) => {
-                log::error!("{log_state} solution run error: {e}");
+                log::error!("{log_state} solution run error: {e:?}");
                 return Err(e);
             }
         };
@@ -183,7 +183,7 @@ impl super::Environment for Environment {
         let checker_result = match self.sandbox.run(&checker_cmd).await {
             Ok(res) => res,
             Err(e) => {
-                log::error!("{log_state} checker error: {e}");
+                log::error!("{log_state} checker error: {e:?}");
                 return Err(e);
             }
         };
