@@ -36,9 +36,7 @@ impl<
         let solution = challenge
             .solve(&self.cert, &policy::StandardPolicy::new())
             .context("solving auth challenge")?;
-        self.auth_stream
-            .send(Outgo::ChallengeSolution(solution))
-            .await
+        self.auth_stream.send(Outgo::AuthProof(solution)).await
     }
 
     async fn listen_master_stream(self: Arc<Self>) -> Result<()> {

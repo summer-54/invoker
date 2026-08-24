@@ -9,14 +9,17 @@ mod server;
 mod types;
 
 use prelude::*;
-use toaster_lib_rs::logger;
 
 use logger::LogState;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use std::{path::Path, sync::Arc};
-use toaster_lib_rs::auth::{Cert, Parse};
+use toaster_lib_rs::{
+    auth::{Cert, Parse},
+    logger,
+    server::grpc,
+};
 
 use crate::{
     application::App,
@@ -26,15 +29,10 @@ use crate::{
 };
 
 #[cfg(not(feature = "mock"))]
-use {
-    crate::server::{
-        stream::{AUTH_NAME, JUDGE_NAME, MASTER_NAME},
-        websocket::{self, Uri},
-    },
-    std::str::FromStr,
-};
 #[derive(Clone, Deserialize, Debug)]
 struct Config {
+    pub token: Box<str>,
+
     #[cfg(not(feature = "mock"))]
     pub manager_host: Box<str>,
     pub config_dir: Box<Path>,
@@ -67,31 +65,77 @@ struct Communication<
 #[cfg(not(feature = "mock"))]
 async fn init_websocket_communication(
     config: Arc<Config>,
-) -> Result<(
-    tokio::task::JoinHandle<Result<()>>,
+) -> Result<
     Communication<
         impl Stream<AuthIncome, AuthOutgo>,
         impl Stream<MasterIncome, MasterOutgo>,
         impl Stream<JudgeIncome, JudgeOutgo>,
     >,
-)> {
-    let channel = Arc::new(
-        websocket::Channel::bind(
-            config.manager_host.as_ref(),
-            Uri::from_str(format!("ws://{}", config.manager_host).as_str())?,
-        )
-        .await?,
-    );
+> {
+    use tonic::transport::Channel;
 
-    let communication = Communication {
-        auth_stream: channel.new_stream(AUTH_NAME).await,
-        master_stream: channel.new_stream(MASTER_NAME).await,
-        judge_stream: channel.new_stream(JUDGE_NAME).await,
+    let channel = Channel::builder(
+        config
+            .manager_host
+            .parse()
+            .context("parsing manager host field")?,
+    )
+    .connect()
+    .await?;
+
+    let mut client = grpc::Client::with_interceptor(
+        channel,
+        server::TokenInterceptor::new(&config.token).context("TokenInterceptor creating")?,
+    );
+    let auth_stream = {
+        use tonic::Request;
+
+        let (sender_outgo, receiver_outgo) = tokio::sync::mpsc::unbounded_channel();
+        let request = Request::new(tokio_stream::wrappers::UnboundedReceiverStream::new(
+            receiver_outgo,
+        ));
+        let response = client
+            .auth(request)
+            .await
+            .context("gRPC: auth()")?
+            .into_inner();
+        grpc::Stream::new(response, sender_outgo)
     };
 
-    let handler = tokio::spawn(channel.run());
+    let master_stream = {
+        use tonic::Request;
+        let (sender_outgo, receiver_outgo) = tokio::sync::mpsc::unbounded_channel();
+        let request = Request::new(tokio_stream::wrappers::UnboundedReceiverStream::new(
+            receiver_outgo,
+        ));
+        let response = client
+            .master_stream(request)
+            .await
+            .context("gRPC: auth()")?
+            .into_inner();
+        grpc::Stream::new(response, sender_outgo)
+    };
 
-    Ok((handler, communication))
+    let judge_stream = {
+        use tonic::Request;
+        let (sender_outgo, receiver_outgo) = tokio::sync::mpsc::unbounded_channel();
+        let request = Request::new(tokio_stream::wrappers::UnboundedReceiverStream::new(
+            receiver_outgo,
+        ));
+        let response = client
+            .judge_stream(request)
+            .await
+            .context("gRPC: auth()")?
+            .into_inner();
+        grpc::Stream::new(response, sender_outgo)
+    };
+    let communication = Communication {
+        auth_stream,
+        master_stream,
+        judge_stream,
+    };
+
+    Ok(communication)
 }
 
 #[cfg(feature = "mock")]
@@ -137,7 +181,7 @@ async fn main() -> Result<()> {
     println!("\n[{}] invoker token\n", format!("{token}").yellow().bold());
 
     #[cfg(not(feature = "mock"))]
-    let (_handler, communication) = init_websocket_communication(config.clone()).await?;
+    let communication = init_websocket_communication(config.clone()).await?;
 
     #[cfg(feature = "mock")]
     let communication = {
@@ -173,12 +217,9 @@ async fn main() -> Result<()> {
         cert: Arc::new(cert),
     };
 
-    Stream::<MasterIncome, MasterOutgo>::send(
-        &app.master_stream,
-        MasterOutgo::Token {
-            token,
-            name: config.cert_name.clone(),
-        },
+    Stream::<AuthIncome, AuthOutgo>::send(
+        &app.auth_stream,
+        AuthOutgo::CertName(config.cert_name.clone()),
     )
     .await?;
 

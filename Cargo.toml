@@ -43,6 +43,9 @@ async-trait = {version = "*"}
 bytesize = {version = "*"}
 lru = {version = "*"}
 
+tonic = "*"
+tokio-stream = "*"
+
 [features]
 default = []
 mock = []
