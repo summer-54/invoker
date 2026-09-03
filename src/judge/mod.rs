@@ -288,7 +288,7 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
                         .context("internal sending test result")?;
                     let verdict = payload.result.verdict;
                     this.judge_stream
-                        .send(JudgeOutgo::TestResult(payload))
+                        .send(JudgeOutgo::TestResultPayload(payload))
                         .await
                         .context("sending test result")?;
                     if !verdict.is_success() {
@@ -311,7 +311,7 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
         }
         let blocked_groups = blocked_groups.lock().await;
 
-        let groups_score: Box<[usize]> = (0..task.groups.len())
+        let group_scores: Box<[usize]> = (0..task.groups.len())
             .map(|i| {
                 if blocked_groups[i].is_none() {
                     task.groups[i].cost
@@ -322,8 +322,9 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
             .collect();
 
         let result = submission::Result::Ok {
-            score: groups_score.iter().sum(),
-            groups_score,
+            score: group_scores.iter().sum(),
+            group_scores,
+            value: (),
         };
 
         log::info!("full result: {result:?}");
@@ -397,13 +398,15 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
                         match &result {
                             Ok(full_verdict) => self_clone
                                 .judge_stream
-                                .send(JudgeOutgo::FullResult(match full_verdict {
+                                .send(JudgeOutgo::SubmissionResult(match full_verdict {
                                     submission::Result::Ok {
                                         score,
-                                        groups_score,
+                                        group_scores,
+                                        ..
                                     } => submission::Result::Ok {
                                         score: *score,
-                                        groups_score: groups_score.clone(),
+                                        group_scores: group_scores.clone(),
+                                        value: (),
                                     },
                                     submission::Result::Ce(msg) => {
                                         submission::Result::Ce(msg.clone())
@@ -418,9 +421,7 @@ impl<JS: Stream<JudgeIncome, JudgeOutgo> + Send + Sync + 'static> Service<JS> {
                                 log::error!("{e:?}");
                                 self_clone
                                     .judge_stream
-                                    .send(JudgeOutgo::Error {
-                                        msg: e.to_string().into(),
-                                    })
+                                    .send(JudgeOutgo::Error(e.to_string().into()))
                                     .await
                                     .context("sending error message")?
                             }

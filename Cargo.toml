@@ -43,7 +43,7 @@ async-trait = {version = "*"}
 bytesize = {version = "*"}
 lru = {version = "*"}
 
-tonic = "*"
+tonic = {version = "*", features = ["zstd"]}
 tokio-stream = "*"
 
 [features]
