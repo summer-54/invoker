@@ -68,14 +68,19 @@ impl<
         use server::stream::AuthIncome as Income;
         log::info!("auth stream listener open");
         loop {
-            let msg = match self
+            let msg = self
                 .auth_stream
                 .recv()
                 .await
-                .context("reading auth message")?
-            {
-                Ok(msg) => msg,
+                .context("reading auth message");
+
+            let msg = match msg {
                 Err(e) => {
+                    log::info!("auth stream broken: {e:?}");
+                    return Ok(());
+                }
+                Ok(Ok(msg)) => msg,
+                Ok(Err(e)) => {
                     log::error!("{e:?}");
                     continue;
                 }
@@ -98,9 +103,9 @@ impl<
     pub async fn run(self: &Arc<Self>) -> Result<()> {
         let this = Arc::clone(self);
         tokio::select! {
-            res = tokio::spawn(async move {this.judge_service.run().await}) => res.context("listening master stream")?,
-            res = tokio::spawn(Arc::clone(self).listen_master_stream()) => res.context("listening master stream")?,
-            res = tokio::spawn(Arc::clone(self).listen_auth_stream()) => res.context("listening auth stream")?,
+            Ok(Err(res)) = tokio::spawn(async move { this.judge_service.run().await }) => Err(res).context("listening master stream")?,
+            Ok(Err(res)) = tokio::spawn(Arc::clone(self).listen_master_stream()) => Err(res).context("listening master stream")?,
+            Ok(Err(res)) = tokio::spawn(Arc::clone(self).listen_auth_stream()) => Err(res).context("listening auth stream")?,
         }
     }
 }

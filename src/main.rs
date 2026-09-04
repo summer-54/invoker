@@ -79,15 +79,14 @@ async fn init_websocket_communication(
     >,
 > {
     use tonic::{codec::CompressionEncoding, transport::Channel};
+    let uri: http::Uri = config
+        .manager_host
+        .parse()
+        .context("parsing manager host field")?;
 
-    let channel = Channel::builder(
-        config
-            .manager_host
-            .parse()
-            .context("parsing manager host field")?,
-    )
-    .connect()
-    .await?;
+    log::trace!("manager host uri: {uri:?}");
+
+    let channel = Channel::builder(uri).connect().await?;
     let mut token_interceptor =
         server::TokenInterceptor::new(&config.token).context("TokenInterceptor creating")?;
     let mut cert_name_interceptor =
